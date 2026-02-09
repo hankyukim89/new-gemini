@@ -37,6 +37,8 @@ export const ChatArea: React.FC = () => {
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
     const [editContent, setEditContent] = useState('');
     const [isListening, setIsListening] = useState(false);
+    const [streamingNodeId, setStreamingNodeId] = useState<string | null>(null);
+    const [streamingContent, setStreamingContent] = useState('');
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -68,7 +70,7 @@ export const ChatArea: React.FC = () => {
 
     useEffect(() => {
         scrollToBottom();
-    }, [currentSession?.currentLeafId]);
+    }, [currentSession?.currentLeafId, streamingContent]);
 
     // --- Text-to-Speech (Browser Native) ---
     const speakMessage = async (text: string, msgId: string) => {
@@ -194,6 +196,9 @@ export const ChatArea: React.FC = () => {
             return;
         }
 
+        setStreamingNodeId(modelNodeId);
+        setStreamingContent('');
+
         // 4. Stream Response
         abortControllerRef.current = new AbortController();
 
@@ -212,14 +217,9 @@ export const ChatArea: React.FC = () => {
                     break;
                 }
 
-                if (fullText === '') {
-                    // We don't want to create a NEW branch for every chunk.
-                    useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, chunk);
-                } else {
-                    useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, fullText + chunk);
-                }
-
                 fullText += chunk;
+                setStreamingContent(fullText);
+                useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, fullText);
             }
         } catch (e: any) {
             if (e.name !== 'AbortError') {
@@ -228,6 +228,8 @@ export const ChatArea: React.FC = () => {
         } finally {
             setIsLoading(false);
             setIsStreaming(false);
+            setStreamingNodeId(null);
+            setStreamingContent('');
             abortControllerRef.current = null;
         }
     };
@@ -330,7 +332,7 @@ export const ChatArea: React.FC = () => {
                                                     }
                                                 }}
                                             >
-                                                {msg.content}
+                                                {(streamingNodeId === msg.id && streamingContent) ? streamingContent : msg.content}
                                             </ReactMarkdown>
                                         </div>
 

@@ -1,14 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { usePersonaStore, type Persona } from '../store/usePersonaStore';
-import { X, Plus, Trash2, Save, Bot, BrainCircuit, Sparkles, MessageSquare } from 'lucide-react';
-import { PLAYGROUND_MODELS } from '../services/geminiService';
+import { usePersonaStore, type Persona, DEFAULT_CONFIG } from '../store/usePersonaStore';
+import { X, Plus, Trash2, Save, Bot, BrainCircuit, Sparkles, MessageSquare, Info, RotateCcw } from 'lucide-react';
+import { PLAYGROUND_MODELS, MODEL_LIMITS } from '../services/geminiService';
 import { cn } from '../lib/utils';
-import { v4 as uuidv4 } from 'uuid';
+
 
 interface PersonaManagerProps {
     isOpen: boolean;
     onClose: () => void;
 }
+
+
+const InfoTooltip: React.FC<{ text: string }> = ({ text }) => (
+    <div className="group relative inline-block ml-2 cursor-help align-middle">
+        <Info className="w-4 h-4 text-gray-400 hover:text-blue-400 transition-colors" />
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-center pointer-events-none">
+            {text}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-gray-700"></div>
+        </div>
+    </div>
+);
 
 export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose }) => {
     const { personas, addPersona, updatePersona, deletePersona, activePersonaId, setActivePersona } = usePersonaStore();
@@ -17,10 +28,12 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
 
     // Initialize selection when opening
     useEffect(() => {
-        if (isOpen && !selectedPersonaId) {
+        if (isOpen) {
             setSelectedPersonaId(activePersonaId || personas[0]?.id || null);
+        } else {
+            setSelectedPersonaId(null);
         }
-    }, [isOpen, activePersonaId, personas, selectedPersonaId]);
+    }, [isOpen]);
 
     // Update form when selection changes
     useEffect(() => {
@@ -32,25 +45,32 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
         }
     }, [selectedPersonaId, personas]);
 
+    // --- Dirty Checking (must be before early return to respect Rules of Hooks) ---
+    const originalPersona = personas.find(p => p.id === selectedPersonaId);
+    const hasChanges = React.useMemo(() => {
+        if (!originalPersona || !formData) return false;
+        return JSON.stringify(originalPersona) !== JSON.stringify(formData);
+    }, [originalPersona, formData]);
+
     if (!isOpen) return null;
 
     const handleCreateNew = () => {
-        const newPersona: Persona = {
-            id: uuidv4(),
+        addPersona({
             name: 'New Gem',
             description: 'A new custom AI assistant',
             systemPrompt: 'You are a helpful AI assistant.',
             avatar: '💎',
-            config: {
-                model: 'gemini-2.0-flash',
-                temperature: 0.7,
-                topK: 40,
-                topP: 0.95,
-                maxOutputTokens: 2048,
+            config: { ...DEFAULT_CONFIG }
+        });
+        // The store assigns the ID via uuidv4(); find it as the last persona
+        // We need to get the updated personas list after the add
+        setTimeout(() => {
+            const updatedPersonas = usePersonaStore.getState().personas;
+            const lastPersona = updatedPersonas[updatedPersonas.length - 1];
+            if (lastPersona) {
+                setSelectedPersonaId(lastPersona.id);
             }
-        };
-        addPersona(newPersona);
-        setSelectedPersonaId(newPersona.id);
+        }, 0);
     };
 
     const handleSave = () => {
@@ -75,6 +95,14 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
         setFormData(prev => prev ? {
             ...prev,
             config: { ...prev.config!, [field]: value }
+        } : null);
+    };
+
+    const handleResetDefaults = () => {
+        if (!formData) return;
+        setFormData(prev => prev ? {
+            ...prev,
+            config: { ...DEFAULT_CONFIG, model: prev.config?.model || DEFAULT_CONFIG.model }
         } : null);
     };
 
@@ -159,9 +187,16 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                             </button>
                             <button
                                 onClick={handleSave}
-                                className="px-4 py-2 bg-white text-black hover:bg-gray-200 rounded-lg text-sm font-bold transition-all flex items-center gap-2"
+                                disabled={!hasChanges}
+                                className={cn(
+                                    "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
+                                    hasChanges
+                                        ? "bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20"
+                                        : "bg-gray-800 text-gray-500 cursor-not-allowed"
+                                )}
                             >
-                                <Save className="w-4 h-4" /> Save
+                                <Save className="w-4 h-4" />
+                                {hasChanges ? "Save Changes" : "Saved"}
                             </button>
                             <button
                                 onClick={onClose}
@@ -228,8 +263,17 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                 </div>
 
                                 {/* Advanced Settings */}
-                                <div className="pt-6 border-t border-gray-800">
-                                    <h4 className="text-lg font-semibold text-white mb-6">Model Configuration</h4>
+                                <div className="pt-6 border-t border-gray-800 relative">
+                                    <div className="flex items-center justify-between mb-6">
+                                        <h4 className="text-lg font-semibold text-white">Model Configuration</h4>
+                                        <button
+                                            onClick={handleResetDefaults}
+                                            className="text-xs text-gray-500 hover:text-white flex items-center gap-1 transition-colors"
+                                            title="Reset to recommended defaults"
+                                        >
+                                            <RotateCcw className="w-3 h-3" /> Reset Defaults
+                                        </button>
+                                    </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                         <div className="space-y-2">
@@ -247,9 +291,10 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
 
                                         <div className="space-y-6">
                                             <div className="space-y-2">
-                                                <div className="flex justify-between">
+                                                <div className="flex items-center">
                                                     <label className="text-sm font-medium text-gray-400">Temperature</label>
-                                                    <span className="text-sm text-blue-400 font-mono">{formData.config?.temperature}</span>
+                                                    <InfoTooltip text="Controls randomness. Higher values (e.g., 0.8) make output more random, while lower values (e.g., 0.2) make it more focused and deterministic." />
+                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.temperature}</span>
                                                 </div>
                                                 <input
                                                     type="range"
@@ -263,9 +308,10 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                             </div>
 
                                             <div className="space-y-2">
-                                                <div className="flex justify-between">
+                                                <div className="flex items-center">
                                                     <label className="text-sm font-medium text-gray-400">Top P</label>
-                                                    <span className="text-sm text-blue-400 font-mono">{formData.config?.topP}</span>
+                                                    <InfoTooltip text="Limits the model to the cumulative probability of the top tokens. Lower values make the output more focused." />
+                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.topP}</span>
                                                 </div>
                                                 <input
                                                     type="range"
@@ -278,17 +324,59 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                                 />
                                             </div>
 
-                                            <div className="space-y-2">
-                                                <div className="flex justify-between">
+                                            <div className="space-y-3">
+                                                <div className="flex items-center">
                                                     <label className="text-sm font-medium text-gray-400">Top K</label>
-                                                    <span className="text-sm text-blue-400 font-mono">{formData.config?.topK}</span>
+                                                    <InfoTooltip text="Limits the model to choose from the top K most likely tokens. Lower values reduce randomness." />
+                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.topK}</span>
                                                 </div>
-                                                <input
-                                                    type="number"
-                                                    value={formData.config?.topK}
-                                                    onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
-                                                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-blue-500 outline-none"
-                                                />
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="range"
+                                                        min="1"
+                                                        max="100"
+                                                        step="1"
+                                                        value={formData.config?.topK}
+                                                        onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
+                                                        className="flex-1 accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        max="100"
+                                                        value={formData.config?.topK}
+                                                        onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
+                                                        className="w-16 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-right text-sm text-white focus:border-blue-500 outline-none transition-all"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                <div className="flex items-center">
+                                                    <label className="text-sm font-medium text-gray-400">Max Output Tokens</label>
+                                                    <InfoTooltip text="The maximum number of tokens to generate in the response. Increase this for longer outputs (up to 81920)." />
+                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.maxOutputTokens}</span>
+                                                </div>
+                                                <div className="flex items-center gap-4">
+                                                    <input
+                                                        type="range"
+                                                        min="100"
+                                                        max={MODEL_LIMITS[formData.config?.model || 'gemini-2.0-flash'] || 8192}
+                                                        step="100"
+                                                        value={formData.config?.maxOutputTokens || 8192}
+                                                        onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
+                                                        className="flex-1 accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                                                    />
+                                                    <input
+                                                        type="number"
+                                                        min="100"
+                                                        max={MODEL_LIMITS[formData.config?.model || 'gemini-2.0-flash'] || 81920}
+                                                        step="100"
+                                                        value={formData.config?.maxOutputTokens || 8192}
+                                                        onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
+                                                        className="w-20 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-right text-sm text-white focus:border-blue-500 outline-none transition-all"
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

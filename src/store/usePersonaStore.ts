@@ -29,7 +29,7 @@ export interface PersonaState {
     movePersona: (id: string, direction: 'up' | 'down') => void;
 }
 
-const DEFAULT_CONFIG: PersonaConfig = {
+export const DEFAULT_CONFIG: PersonaConfig = {
     model: 'gemini-2.0-flash',
     temperature: 0.7,
     topK: 40,
