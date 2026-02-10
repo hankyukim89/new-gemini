@@ -1,11 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore, type MessageNode } from '../store/useChatStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePersonaStore } from '../store/usePersonaStore';
 import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech } from '../services/geminiService';
-import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square } from 'lucide-react';
+import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import { cn } from '../lib/utils';
 
 // --- Speech Types ---
@@ -24,6 +25,40 @@ declare global {
         SpeechRecognition: any;
     }
 }
+
+// --- Code Block with Copy Button ---
+const CodeBlock = ({ className, children, ...props }: any) => {
+    const [copied, setCopied] = useState(false);
+    const match = /language-(\w+)/.exec(className || '');
+    const language = match ? match[1] : '';
+    const codeString = String(children).replace(/\n$/, '');
+
+    const handleCopy = useCallback(async () => {
+        await navigator.clipboard.writeText(codeString);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    }, [codeString]);
+
+    return (
+        <div className="not-prose my-3">
+            <div className="code-block-header">
+                <span>{language || 'code'}</span>
+                <button onClick={handleCopy}>
+                    {copied ? (
+                        <><Check className="w-3 h-3" /> Copied!</>
+                    ) : (
+                        <><Copy className="w-3 h-3" /> Copy code</>
+                    )}
+                </button>
+            </div>
+            <pre className="!mt-0 !rounded-t-none">
+                <code className={className} {...props}>
+                    {children}
+                </code>
+            </pre>
+        </div>
+    );
+};
 
 export const ChatArea: React.FC = () => {
     const { currentSessionId, sessions, addMessage, addSession, navigateBranch } = useChatStore();
@@ -319,16 +354,30 @@ export const ChatArea: React.FC = () => {
                                             : msg.content.startsWith('**Error**') ? "bg-red-900/20 border border-red-500/50 text-red-200" : "bg-gray-800 text-gray-100"
                                     )}>
                                         {msg.content.startsWith('**Error**') && <AlertTriangle className="w-4 h-4 mb-2 text-red-400" />}
-                                        <div className="prose prose-invert prose-sm max-w-none">
+                                        <div className="prose prose-invert prose-sm max-w-none prose-chat">
                                             <ReactMarkdown
                                                 remarkPlugins={[remarkGfm]}
+                                                rehypePlugins={[rehypeHighlight]}
                                                 components={{
-                                                    code({ node, inline, className, children, ...props }: any) {
+                                                    code({ node, className, children, ...props }: any) {
+                                                        const isBlock = /language-/.test(className || '') ||
+                                                            (typeof children === 'string' && children.includes('\n')) ||
+                                                            (Array.isArray(children) && String(children.join('')).includes('\n'));
+
+                                                        if (isBlock) {
+                                                            return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
+                                                        }
+
                                                         return (
-                                                            <code className={cn("bg-black/30 rounded px-1", className)} {...props}>
+                                                            <code className={cn("bg-white/10 rounded px-1.5 py-0.5 text-[0.875em]", className)} {...props}>
                                                                 {children}
                                                             </code>
-                                                        )
+                                                        );
+                                                    },
+                                                    pre({ children }: any) {
+                                                        // When rehype-highlight wraps in pre>code, we just pass through
+                                                        // since CodeBlock handles the pre wrapper itself
+                                                        return <>{children}</>;
                                                     }
                                                 }}
                                             >
