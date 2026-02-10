@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { useUsageStore } from "../store/useUsageStore";
+import type { Attachment } from "../store/useChatStore";
 
 // --- STRICT Model List ---
 export const PLAYGROUND_MODELS = [
@@ -32,7 +33,7 @@ export interface ServiceResponse {
 }
 
 export const sendMessageToGemini = async (
-    messages: { role: string; content: string }[],
+    messages: { role: string; content: string; attachments?: Attachment[] }[],
     apiKey: string,
     modelName: string,
     config: { temperature: number; topK: number; topP: number; maxOutputTokens: number; safetySettings?: { category: string; threshold: string }[] }
@@ -45,10 +46,23 @@ export const sendMessageToGemini = async (
             safetySettings: config.safetySettings as any
         });
 
-        const historyForChat = messages.slice(0, -1).map(m => ({
-            role: m.role,
-            parts: [{ text: m.content }]
-        }));
+        const historyForChat = messages.slice(0, -1).map(m => {
+            const parts: any[] = [{ text: m.content }];
+            if (m.attachments) {
+                m.attachments.forEach(att => {
+                    parts.push({
+                        inlineData: {
+                            mimeType: att.mimeType,
+                            data: att.data.split(',')[1] || att.data // Ensure we send only base64
+                        }
+                    });
+                });
+            }
+            return {
+                role: m.role,
+                parts: parts
+            };
+        });
 
         const chat = model.startChat({
             history: historyForChat,
@@ -60,8 +74,20 @@ export const sendMessageToGemini = async (
             }
         });
 
-        const lastMessage = messages[messages.length - 1].content;
-        const result = await chat.sendMessage(lastMessage);
+        const lastMsg = messages[messages.length - 1];
+        const lastParts: any[] = [{ text: lastMsg.content }];
+        if (lastMsg.attachments) {
+            lastMsg.attachments.forEach(att => {
+                lastParts.push({
+                    inlineData: {
+                        mimeType: att.mimeType,
+                        data: att.data.split(',')[1] || att.data
+                    }
+                });
+            });
+        }
+
+        const result = await chat.sendMessage(lastParts);
         const response = result.response;
         const text = response.text();
         const usageMetadata = response.usageMetadata;
@@ -83,7 +109,7 @@ export const sendMessageToGemini = async (
 };
 
 export const sendMessageStream = async function* (
-    messages: { role: string; content: string }[],
+    messages: { role: string; content: string; attachments?: Attachment[] }[],
     apiKey: string,
     modelName: string,
     config: { temperature: number; topK: number; topP: number; maxOutputTokens: number; safetySettings?: { category: string; threshold: string }[] }
@@ -95,10 +121,23 @@ export const sendMessageStream = async function* (
             safetySettings: config.safetySettings as any
         });
 
-        const historyForChat = messages.slice(0, -1).map(m => ({
-            role: m.role,
-            parts: [{ text: m.content }]
-        }));
+        const historyForChat = messages.slice(0, -1).map(m => {
+            const parts: any[] = [{ text: m.content }];
+            if (m.attachments) {
+                m.attachments.forEach(att => {
+                    parts.push({
+                        inlineData: {
+                            mimeType: att.mimeType,
+                            data: att.data.split(',')[1] || att.data
+                        }
+                    });
+                });
+            }
+            return {
+                role: m.role,
+                parts: parts
+            };
+        });
 
         const chat = model.startChat({
             history: historyForChat,
@@ -110,8 +149,20 @@ export const sendMessageStream = async function* (
             }
         });
 
-        const lastMessage = messages[messages.length - 1].content;
-        const result = await chat.sendMessageStream(lastMessage);
+        const lastMsg = messages[messages.length - 1];
+        const lastParts: any[] = [{ text: lastMsg.content }];
+        if (lastMsg.attachments) {
+            lastMsg.attachments.forEach(att => {
+                lastParts.push({
+                    inlineData: {
+                        mimeType: att.mimeType,
+                        data: att.data.split(',')[1] || att.data
+                    }
+                });
+            });
+        }
+
+        const result = await chat.sendMessageStream(lastParts);
 
         let aggregatedText = '';
 

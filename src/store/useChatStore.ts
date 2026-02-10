@@ -2,10 +2,20 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
 
+
+export interface Attachment {
+    id: string;
+    type: 'image' | 'file';
+    mimeType: string;
+    data: string; // Base64 or URL
+    name: string;
+}
+
 export interface MessageNode {
     id: string;
     role: 'user' | 'model';
     content: string;
+    attachments?: Attachment[];
     timestamp: number;
     parentId: string | null;
     childrenIds: string[];
@@ -28,7 +38,7 @@ export interface ChatState {
     selectSession: (id: string) => void;
 
     // Core Tree Actions
-    addMessage: (sessionId: string, role: 'user' | 'model', content: string) => string;
+    addMessage: (sessionId: string, role: 'user' | 'model', content: string, attachments?: Attachment[]) => string;
     editMessage: (sessionId: string, originalMessageId: string, newContent: string) => void;
     updateMessageContent: (sessionId: string, messageId: string, newContent: string) => void; // In-place update for streaming
     navigateBranch: (sessionId: string, nodeId: string, direction: 'prev' | 'next') => void;
@@ -75,7 +85,7 @@ export const useChatStore = create<ChatState>()(
             },
             selectSession: (id) => set({ currentSessionId: id }),
 
-            addMessage: (sessionId, role, content) => {
+            addMessage: (sessionId, role, content, attachments = []) => {
                 const newMessageId = uuidv4();
                 set((state) => {
                     const sessionIndex = state.sessions.findIndex((s) => s.id === sessionId);
@@ -88,6 +98,7 @@ export const useChatStore = create<ChatState>()(
                         id: newMessageId,
                         role,
                         content,
+                        attachments,
                         timestamp: Date.now(),
                         parentId: parentId,
                         childrenIds: []

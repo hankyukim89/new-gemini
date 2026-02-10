@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { usePersonaStore, type Persona, DEFAULT_CONFIG } from '../store/usePersonaStore';
-import { X, Plus, Trash2, Save, Bot, BrainCircuit, Sparkles, MessageSquare, Info, RotateCcw, Shield, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Plus, Trash2, Save, Bot, BrainCircuit, Sparkles, MessageSquare, Info, RotateCcw, Shield, Sliders, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import { PLAYGROUND_MODELS, MODEL_LIMITS } from '../services/geminiService';
 import { cn } from '../lib/utils';
 
@@ -37,10 +37,11 @@ const BLOCK_THRESHOLDS = [
 ];
 
 export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose }) => {
-    const { personas, addPersona, updatePersona, deletePersona, activePersonaId, setActivePersona } = usePersonaStore();
+    const { personas, addPersona, updatePersona, deletePersona, activePersonaId } = usePersonaStore();
     const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Persona> | null>(null);
     const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+    const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
 
     // Initialize selection when opening
     useEffect(() => {
@@ -184,12 +185,42 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                         </div>
                                     </div>
                                     {personas.length > 1 && (
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); handleDelete(persona.id); }}
-                                            className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-900/30 text-gray-500 hover:text-red-400 rounded transition-all"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
+                                        <div onClick={(e) => e.stopPropagation()}>
+                                            {deleteConfirmationId === persona.id ? (
+                                                <div className="flex items-center gap-2 animate-in fade-in duration-200">
+                                                    <span className="text-xs text-red-400 font-medium">Sure?</span>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDelete(persona.id);
+                                                            setDeleteConfirmationId(null);
+                                                        }}
+                                                        className="p-1.5 bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white rounded transition-all"
+                                                    >
+                                                        <Check className="w-3 h-3" />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setDeleteConfirmationId(null);
+                                                        }}
+                                                        className="p-1.5 bg-gray-800 text-gray-400 hover:text-white rounded transition-all"
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setDeleteConfirmationId(persona.id);
+                                                    }}
+                                                    className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-900/30 text-gray-500 hover:text-red-400 rounded transition-all"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -203,26 +234,8 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                     <div className="h-16 border-b border-gray-800 flex items-center justify-between px-8 bg-[#131620]/50 backdrop-blur-md">
                         <div className="flex items-center gap-4">
                             <h3 className="text-lg font-semibold text-white">Edit Gem</h3>
-                            {formData?.id === activePersonaId && (
-                                <span className="px-3 py-1 bg-green-500/10 text-green-400 text-xs rounded-full border border-green-500/20">
-                                    Active Use
-                                </span>
-                            )}
                         </div>
                         <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => {
-                                    if (selectedPersonaId) setActivePersona(selectedPersonaId);
-                                }}
-                                className={cn(
-                                    "px-4 py-2 rounded-lg text-sm font-medium transition-all border",
-                                    formData?.id === activePersonaId
-                                        ? "bg-green-600/10 border-green-600/30 text-green-400 cursor-default"
-                                        : "bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
-                                )}
-                            >
-                                {formData?.id === activePersonaId ? "Currently Active" : "Set as Active"}
-                            </button>
                             <button
                                 onClick={handleSave}
                                 disabled={!hasChanges}
