@@ -8,6 +8,14 @@ export interface PersonaConfig {
     topK: number;
     topP: number;
     maxOutputTokens: number;
+    safetySettings?: {
+        category: string;
+        threshold: string;
+    }[];
+    temperature: number;
+    topK: number;
+    topP: number;
+    maxOutputTokens: number;
 }
 
 export interface Persona {

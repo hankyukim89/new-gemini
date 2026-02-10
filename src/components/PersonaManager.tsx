@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { usePersonaStore, type Persona, DEFAULT_CONFIG } from '../store/usePersonaStore';
-import { X, Plus, Trash2, Save, Bot, BrainCircuit, Sparkles, MessageSquare, Info, RotateCcw } from 'lucide-react';
+import { X, Plus, Trash2, Save, Bot, BrainCircuit, Sparkles, MessageSquare, Info, RotateCcw, Shield, Sliders, ChevronDown, ChevronUp } from 'lucide-react';
 import { PLAYGROUND_MODELS, MODEL_LIMITS } from '../services/geminiService';
 import { cn } from '../lib/utils';
 
@@ -14,17 +14,33 @@ interface PersonaManagerProps {
 const InfoTooltip: React.FC<{ text: string }> = ({ text }) => (
     <div className="group relative inline-block ml-2 cursor-help align-middle">
         <Info className="w-4 h-4 text-gray-400 hover:text-blue-400 transition-colors" />
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-center pointer-events-none">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-gray-900 border border-gray-700 text-xs text-gray-300 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 text-center pointer-events-none data-[side=top]:animate-slide-up-fade">
             {text}
             <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-gray-700"></div>
         </div>
     </div>
 );
 
+// --- Constants for Safety Settings ---
+const HARM_CATEGORIES = [
+    { id: 'HARM_CATEGORY_HARASSMENT', label: 'Harassment' },
+    { id: 'HARM_CATEGORY_HATE_SPEECH', label: 'Hate Speech' },
+    { id: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', label: 'Sexually Explicit' },
+    { id: 'HARM_CATEGORY_DANGEROUS_CONTENT', label: 'Dangerous Content' },
+];
+
+const BLOCK_THRESHOLDS = [
+    { value: 'BLOCK_NONE', label: 'None', description: 'No blocking' },
+    { value: 'BLOCK_ONLY_HIGH', label: 'Few', description: 'Block only high probability' },
+    { value: 'BLOCK_MEDIUM_AND_ABOVE', label: 'Some', description: 'Block medium and high probability' },
+    { value: 'BLOCK_LOW_AND_ABOVE', label: 'Most', description: 'Block low, medium, and high probability' },
+];
+
 export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose }) => {
     const { personas, addPersona, updatePersona, deletePersona, activePersonaId, setActivePersona } = usePersonaStore();
     const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Persona> | null>(null);
+    const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
 
     // Initialize selection when opening
     useEffect(() => {
@@ -96,6 +112,28 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
             ...prev,
             config: { ...prev.config!, [field]: value }
         } : null);
+    };
+
+    const handleSafetyChange = (category: string, threshold: string) => {
+        setFormData(prev => {
+            if (!prev || !prev.config) return null;
+
+            const currentSettings = prev.config.safetySettings || [];
+            const otherSettings = currentSettings.filter(s => s.category !== category);
+
+            return {
+                ...prev,
+                config: {
+                    ...prev.config,
+                    safetySettings: [...otherSettings, { category, threshold }]
+                }
+            };
+        });
+    };
+
+    const getSafetyValue = (category: string) => {
+        const setting = formData?.config?.safetySettings?.find(s => s.category === category);
+        return setting?.threshold || 'BLOCK_MEDIUM_AND_ABOVE'; // Default
     };
 
     const handleResetDefaults = () => {
@@ -262,10 +300,10 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                     <p className="text-xs text-gray-500">System prompt defines the core personality and rules.</p>
                                 </div>
 
-                                {/* Advanced Settings */}
-                                <div className="pt-6 border-t border-gray-800 relative">
+                                {/* Model & Behavior */}
+                                <div className="pt-6 border-t border-gray-800">
                                     <div className="flex items-center justify-between mb-6">
-                                        <h4 className="text-lg font-semibold text-white">Model Configuration</h4>
+                                        <h4 className="text-lg font-semibold text-white">Model Behavior</h4>
                                         <button
                                             onClick={handleResetDefaults}
                                             className="text-xs text-gray-500 hover:text-white flex items-center gap-1 transition-colors"
@@ -303,98 +341,166 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                                 />
                                             </button>
                                         </div>
-
-                                        <div className="space-y-6">
-                                            <div className="space-y-2">
-                                                <div className="flex items-center">
-                                                    <label className="text-sm font-medium text-gray-400">Temperature</label>
-                                                    <InfoTooltip text="Controls randomness. Higher values (e.g., 0.8) make output more random, while lower values (e.g., 0.2) make it more focused and deterministic." />
-                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.temperature}</span>
-                                                </div>
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max="2"
-                                                    step="0.1"
-                                                    value={formData.config?.temperature}
-                                                    onChange={(e) => updateConfig('temperature', parseFloat(e.target.value))}
-                                                    className="w-full accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
-                                                />
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <div className="flex items-center">
-                                                    <label className="text-sm font-medium text-gray-400">Top P</label>
-                                                    <InfoTooltip text="Limits the model to the cumulative probability of the top tokens. Lower values make the output more focused." />
-                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.topP}</span>
-                                                </div>
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max="1"
-                                                    step="0.05"
-                                                    value={formData.config?.topP}
-                                                    onChange={(e) => updateConfig('topP', parseFloat(e.target.value))}
-                                                    className="w-full accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
-                                                />
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <div className="flex items-center">
-                                                    <label className="text-sm font-medium text-gray-400">Top K</label>
-                                                    <InfoTooltip text="Limits the model to choose from the top K most likely tokens. Lower values reduce randomness." />
-                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.topK}</span>
-                                                </div>
-                                                <div className="flex items-center gap-4">
-                                                    <input
-                                                        type="range"
-                                                        min="1"
-                                                        max="100"
-                                                        step="1"
-                                                        value={formData.config?.topK}
-                                                        onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
-                                                        className="flex-1 accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
-                                                    />
-                                                    <input
-                                                        type="number"
-                                                        min="1"
-                                                        max="100"
-                                                        value={formData.config?.topK}
-                                                        onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
-                                                        className="w-16 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-right text-sm text-white focus:border-blue-500 outline-none transition-all"
-                                                    />
-                                                </div>
-                                            </div>
-
-                                            <div className="space-y-3">
-                                                <div className="flex items-center">
-                                                    <label className="text-sm font-medium text-gray-400">Max Output Tokens</label>
-                                                    <InfoTooltip text="The maximum number of tokens to generate in the response. Increase this for longer outputs (up to 81920)." />
-                                                    <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.maxOutputTokens}</span>
-                                                </div>
-                                                <div className="flex items-center gap-4">
-                                                    <input
-                                                        type="range"
-                                                        min="100"
-                                                        max={MODEL_LIMITS[formData.config?.model || 'gemini-2.0-flash'] || 8192}
-                                                        step="100"
-                                                        value={formData.config?.maxOutputTokens || 8192}
-                                                        onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
-                                                        className="flex-1 accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
-                                                    />
-                                                    <input
-                                                        type="number"
-                                                        min="100"
-                                                        max={MODEL_LIMITS[formData.config?.model || 'gemini-2.0-flash'] || 81920}
-                                                        step="100"
-                                                        value={formData.config?.maxOutputTokens || 8192}
-                                                        onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
-                                                        className="w-20 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-right text-sm text-white focus:border-blue-500 outline-none transition-all"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
                                     </div>
+                                </div>
+
+                                {/* Advanced Settings (Collapsible) */}
+                                <div className="bg-gray-950/30 rounded-xl border border-gray-800 overflow-hidden">
+                                    <button
+                                        onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                                        className="w-full p-4 flex items-center justify-between bg-gray-900/50 hover:bg-gray-900 transition-colors"
+                                    >
+                                        <div className="flex items-center gap-2 font-semibold text-white">
+                                            <Sliders className="w-5 h-5 text-purple-400" />
+                                            Advanced Settings
+                                        </div>
+                                        {isAdvancedOpen ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+                                    </button>
+
+                                    {isAdvancedOpen && (
+                                        <div className="p-6 space-y-8 animate-in slide-in-from-top-2 duration-200 border-t border-gray-800">
+
+                                            {/* Technical Params */}
+                                            <div className="space-y-6">
+                                                <h5 className="text-sm font-medium text-gray-400 uppercase tracking-wider">Parameters</h5>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+                                                    {/* Temperature */}
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center">
+                                                            <label className="text-sm font-medium text-gray-400">Temperature</label>
+                                                            <InfoTooltip text="Controls randomness. Higher values (e.g., 0.8) make output more random, while lower values (e.g., 0.2) make it more focused and deterministic." />
+                                                            <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.temperature}</span>
+                                                        </div>
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="2"
+                                                            step="0.1"
+                                                            value={formData.config?.temperature}
+                                                            onChange={(e) => updateConfig('temperature', parseFloat(e.target.value))}
+                                                            className="w-full accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                                                        />
+                                                    </div>
+
+                                                    {/* Top P */}
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center">
+                                                            <label className="text-sm font-medium text-gray-400">Top P</label>
+                                                            <InfoTooltip text="Limits the model to the cumulative probability of the top tokens. Lower values make the output more focused." />
+                                                            <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.topP}</span>
+                                                        </div>
+                                                        <input
+                                                            type="range"
+                                                            min="0"
+                                                            max="1"
+                                                            step="0.05"
+                                                            value={formData.config?.topP}
+                                                            onChange={(e) => updateConfig('topP', parseFloat(e.target.value))}
+                                                            className="w-full accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                                                        />
+                                                    </div>
+
+                                                    {/* Top K */}
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center">
+                                                            <label className="text-sm font-medium text-gray-400">Top K</label>
+                                                            <InfoTooltip text="Limits the model to choose from the top K most likely tokens. Lower values reduce randomness." />
+                                                            <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.topK}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-4">
+                                                            <input
+                                                                type="range"
+                                                                min="1"
+                                                                max="100"
+                                                                step="1"
+                                                                value={formData.config?.topK}
+                                                                onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
+                                                                className="flex-1 accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                min="1"
+                                                                max="100"
+                                                                value={formData.config?.topK}
+                                                                onChange={(e) => updateConfig('topK', parseInt(e.target.value))}
+                                                                className="w-16 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-right text-sm text-white focus:border-blue-500 outline-none transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Max Output Tokens */}
+                                                    <div className="space-y-3">
+                                                        <div className="flex items-center">
+                                                            <label className="text-sm font-medium text-gray-400">Max Output Tokens</label>
+                                                            <InfoTooltip text="The maximum number of tokens to generate in the response. Increase this for longer outputs (up to 81920)." />
+                                                            <span className="ml-auto text-sm text-blue-400 font-mono">{formData.config?.maxOutputTokens}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-4">
+                                                            <input
+                                                                type="range"
+                                                                min="100"
+                                                                max={MODEL_LIMITS[formData.config?.model || 'gemini-2.0-flash'] || 8192}
+                                                                step="100"
+                                                                value={formData.config?.maxOutputTokens || 8192}
+                                                                onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
+                                                                className="flex-1 accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                min="100"
+                                                                max={MODEL_LIMITS[formData.config?.model || 'gemini-2.0-flash'] || 81920}
+                                                                step="100"
+                                                                value={formData.config?.maxOutputTokens || 8192}
+                                                                onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
+                                                                className="w-20 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-right text-sm text-white focus:border-blue-500 outline-none transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Safety Settings */}
+                                            <div className="space-y-6 pt-6 border-t border-gray-800">
+                                                <div className="flex items-center gap-2">
+                                                    <Shield className="w-5 h-5 text-blue-400" />
+                                                    <h5 className="text-base font-semibold text-white">Run Safety Settings</h5>
+                                                </div>
+                                                <p className="text-sm text-gray-400 -mt-2">Adjust content filtering thresholds.</p>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                                    {HARM_CATEGORIES.map(category => (
+                                                        <div key={category.id} className="space-y-3">
+                                                            <div className="flex justify-between text-sm">
+                                                                <span className="text-gray-300 font-medium">{category.label}</span>
+                                                                <span className="text-blue-400 font-mono text-xs bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                                                                    {BLOCK_THRESHOLDS.find(t => t.value === getSafetyValue(category.id))?.label}
+                                                                </span>
+                                                            </div>
+                                                            <input
+                                                                type="range"
+                                                                min="0"
+                                                                max="3"
+                                                                step="1"
+                                                                value={BLOCK_THRESHOLDS.findIndex(t => t.value === getSafetyValue(category.id))}
+                                                                onChange={(e) => {
+                                                                    const index = parseInt(e.target.value);
+                                                                    handleSafetyChange(category.id, BLOCK_THRESHOLDS[index].value);
+                                                                }}
+                                                                className="w-full accent-blue-500 h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer hover:bg-gray-700 transition-colors"
+                                                            />
+                                                            <div className="flex justify-between text-[10px] text-gray-600 uppercase tracking-widest px-1">
+                                                                <span>None</span>
+                                                                <span>Most</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                        </div>
+                                    )}
                                 </div>
 
                             </div>

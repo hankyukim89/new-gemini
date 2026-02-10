@@ -246,89 +246,19 @@ export const ChatArea: React.FC = () => {
             );
 
             let fullText = '';
-            let currentMessageId = modelNodeId;
-            let buffer = '';
+
 
             for await (const chunk of stream) {
                 if (abortControllerRef.current?.signal.aborted) {
                     break;
                 }
 
-                if (activePersona.isChatMode) {
-                    buffer += chunk;
-                    // Split by sentence endings (. ? !), but keep the delimiter to check, then remove it
-                    // Regex: Match (. or ? or !) followed by (whitespace or end of string)
-                    // We need to be careful not to split on abbreviations like "Mr." but simple split for now
-                    // let's iterate through the buffer and find split points
-
-                    let remainingCheck = buffer;
-                    while (true) {
-                        // Find the first delimiter that is followed by space or end
-                        const match = remainingCheck.match(/([.?!])(\s+|$)/);
-                        if (!match || typeof match.index === 'undefined') {
-                            break;
-                        }
-
-                        // We found a sentence end
-                        const delimiterIndex = match.index;
-                        const delimiter = match[1];
-                        const splitPoint = delimiterIndex + 1; // Include the delimiter in the first part? User said REMOVE periods.
-
-                        // "nah man. i got 3 dollars." -> "nah man"
-                        // User wants NO periods at the end.
-
-                        const sentenceWithDelimiter = remainingCheck.substring(0, splitPoint);
-                        const sentenceClean = sentenceWithDelimiter.slice(0, -1).trim(); // Remove the last char (delimiter)
-
-                        // Update current message with this sentence
-                        useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, sentenceClean);
-
-                        // Create NEW message for the next part
-                        currentMessageId = useChatStore.getState().addMessage(currentSessionId, 'model', '...');
-                        setStreamingNodeId(currentMessageId);
-
-                        // Remove processed part from buffer
-                        remainingCheck = remainingCheck.substring(splitPoint);
-                    }
-
-                    buffer = remainingCheck;
-                    // Update the CURRENT "..." message with the remaining buffer so the user sees typing
-                    if (buffer) {
-                        useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, buffer);
-                        setStreamingContent(buffer); // For local view if needed, but redundant with store update
-                    }
-
-                } else {
-                    fullText += chunk;
-                    setStreamingContent(fullText);
-                    useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, fullText);
-                }
+                fullText += chunk;
+                setStreamingContent(fullText);
+                useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, fullText);
             }
 
-            // Final cleanup for Chat Mode
-            if (activePersona.isChatMode) {
-                if (buffer.trim()) {
-                    // Final update for the last chunk
-                    useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, buffer.trim());
-                } else {
-                    // Buffer is empty, so the current "..." message is redundant. Remove it.
-                    // We need a deleteMessage action or some way to handle this.
-                    // For now, let's just update it to empty? No, better to remove.
-                    // Since we don't have deleteMessage exposed in store easily here without potentially breaking tree,
-                    // let's just leave it empty string? But empty bubbles look bad.
-                    // Let's implement a quick fix: If content is "...", set it to empty string, and UI should hide empty messages?
-                    // Or better: update with empty string and we filter empty messages in UI?
 
-                    // Helper: Check if the message content is still "..."
-                    const verifyNode = useChatStore.getState().sessions.find(s => s.id === currentSessionId)?.messages[currentMessageId];
-                    if (verifyNode && verifyNode.content === '...') {
-                        // It's a dummy node.
-                        // Ideally we delete it. But since `deleteMessage` isn't in our destructured props, let's just make it empty.
-                        // And in the UI render, we can hide empty messages.
-                        useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, '');
-                    }
-                }
-            }
 
         } catch (e: any) {
             if (e.name !== 'AbortError') {
@@ -374,7 +304,7 @@ export const ChatArea: React.FC = () => {
     return (
         <div className="flex-1 flex flex-col h-full bg-gray-950 relative">
             {/* Messages Thread */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div className="flex-1 overflow-y-auto p-4 space-y-1">
                 {thread.length === 0 && (
                     <div className="text-center text-gray-500 mt-20">
                         <p>Start a conversation with {activePersona?.name}...</p>
@@ -463,7 +393,7 @@ export const ChatArea: React.FC = () => {
                                 )}
 
                                 {/* Message Controls (Nav + Edit/Speak) */}
-                                <div className={cn("flex items-center gap-2 mt-2 select-none", msg.role === 'user' ? "justify-end" : "justify-start")}>
+                                <div className={cn("flex items-center gap-2 -mt-1 select-none", msg.role === 'user' ? "justify-end" : "justify-start")}>
                                     {/* Navigation */}
                                     {showNav && (
                                         <div className="flex items-center bg-gray-800 rounded-lg p-1 text-xs font-mono text-gray-400">

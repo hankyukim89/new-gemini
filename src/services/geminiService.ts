@@ -35,12 +35,15 @@ export const sendMessageToGemini = async (
     messages: { role: string; content: string }[],
     apiKey: string,
     modelName: string,
-    config: { temperature: number; topK: number; topP: number; maxOutputTokens: number }
+    config: { temperature: number; topK: number; topP: number; maxOutputTokens: number; safetySettings?: { category: string; threshold: string }[] }
 ): Promise<ServiceResponse> => {
 
     try {
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            safetySettings: config.safetySettings as any
+        });
 
         const historyForChat = messages.slice(0, -1).map(m => ({
             role: m.role,
@@ -83,11 +86,14 @@ export const sendMessageStream = async function* (
     messages: { role: string; content: string }[],
     apiKey: string,
     modelName: string,
-    config: { temperature: number; topK: number; topP: number; maxOutputTokens: number }
+    config: { temperature: number; topK: number; topP: number; maxOutputTokens: number; safetySettings?: { category: string; threshold: string }[] }
 ) {
     try {
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: modelName });
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            safetySettings: config.safetySettings as any
+        });
 
         const historyForChat = messages.slice(0, -1).map(m => ({
             role: m.role,
@@ -135,12 +141,81 @@ export const sendMessageStream = async function* (
 
 // --- Google Cloud TTS API ---
 // --- Browser Native TTS ---
+import { useSettingsStore } from "../store/useSettingsStore";
+
+// ... existing imports ...
+
+// ... (keep Model constants) ...
+
+// ... (keep sendMessageToGemini) ...
+
+// ... (keep sendMessageStream) ...
+
+// --- Google Cloud TTS API & Browser Native TTS ---
 export const synthesizeSpeech = async (text: string, voiceURI: string): Promise<void> => {
+    // 1. Check if it's a Google Cloud Voice (Standard/Premium)
+    // Cloud voices in our list look like: "en-US-Journey-D", "en-GB-Neural2-A", etc.
+    const isCloudVoice = voiceURI.includes('Journey') || voiceURI.includes('Neural2') || voiceURI.includes('Standard') || voiceURI.includes('Wavenet');
+
+    if (isCloudVoice) {
+        const apiKey = useSettingsStore.getState().apiKey;
+        if (!apiKey) {
+            throw new Error("API Key required for Cloud TTS");
+        }
+
+        try {
+            const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    input: { text },
+                    voice: { languageCode: voiceURI.split('-').slice(0, 2).join('-'), name: voiceURI },
+                    audioConfig: { audioEncoding: 'MP3' },
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error?.message || "TTS API Request failed");
+            }
+
+            const data = await response.json();
+            const audioContent = data.audioContent;
+
+            if (!audioContent) {
+                throw new Error("No audio content received");
+            }
+
+            // Play the audio
+            const audio = new Audio(`data:audio/mp3;base64,${audioContent}`);
+            await new Promise<void>((resolve, reject) => {
+                audio.onended = () => resolve();
+                audio.onerror = (e) => reject(e);
+                audio.play().catch(reject);
+            });
+            return;
+
+        } catch (error) {
+            console.warn("Cloud TTS failed, falling back to browser:", error);
+            // Fallback: Proceed to Browser Native TTS below
+            // We just don't return here, letting code execution continue to step 2.
+        }
+    }
+
+    // 2. Browser Native TTS (Fallback or Explicit Selection)
     return new Promise((resolve, reject) => {
         if (!window.speechSynthesis) {
-            reject(new Error("Browser does not support TTS"));
+            console.error("Browser does not support TTS");
+            // If we are here after a Cloud error, we should probably just resolve to avoid crashing app flow
+            resolve();
             return;
         }
+
+        // If we are falling back from Cloud, 'voiceURI' (e.g. 'en-US-Journey-D') won't match any browser voice.
+        // This means 'selectedVoice' will be undefined, and utterance will use the system default.
+        // This is exactly what we want for a fallback.
 
         const utterance = new SpeechSynthesisUtterance(text);
 
@@ -152,8 +227,14 @@ export const synthesizeSpeech = async (text: string, voiceURI: string): Promise<
             utterance.voice = selectedVoice;
         }
 
+        // If falling back, maybe speed it up slightly or ensure it's English if possible?
+        // simple default is fine.
+
         utterance.onend = () => resolve();
-        utterance.onerror = (e) => reject(e);
+        utterance.onerror = (e) => {
+            console.error("Browser TTS Error:", e);
+            reject(e);
+        };
 
         window.speechSynthesis.speak(utterance);
     });

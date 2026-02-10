@@ -20,6 +20,17 @@ interface GlobalSettingsModalProps {
 export const GlobalSettingsModal: React.FC<GlobalSettingsModalProps> = ({ onClose }) => {
     const { apiKey, setApiKey, ttsVoice, setTtsVoice } = useSettingsStore();
 
+    const [browserVoices, setBrowserVoices] = React.useState<SpeechSynthesisVoice[]>([]);
+
+    React.useEffect(() => {
+        const loadVoices = () => {
+            setBrowserVoices(window.speechSynthesis.getVoices());
+        };
+        loadVoices();
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+        return () => { window.speechSynthesis.onvoiceschanged = null; };
+    }, []);
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md p-6 shadow-2xl relative">
@@ -57,13 +68,20 @@ export const GlobalSettingsModal: React.FC<GlobalSettingsModalProps> = ({ onClos
                             onChange={(e) => setTtsVoice(e.target.value)}
                             className="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-white focus:ring-2 focus:ring-purple-500 outline-none transition-all text-sm"
                         >
-                            <option value="">-- Browser Default --</option>
-                            {CLOUD_VOICES.map(v => (
-                                <option key={v.id} value={v.id}>{v.name}</option>
-                            ))}
+                            <option value="">-- Select a Voice --</option>
+                            <optgroup label="Google Cloud (High Quality)">
+                                {CLOUD_VOICES.map(v => (
+                                    <option key={v.id} value={v.id}>{v.name}</option>
+                                ))}
+                            </optgroup>
+                            <optgroup label="Browser Native (Free)">
+                                {browserVoices.map(v => (
+                                    <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>
+                                ))}
+                            </optgroup>
                         </select>
                         <p className="text-xs text-gray-500">
-                            Premium voices (Journey/Neural2) require Google Cloud TTS permissions. Use browser default for free.
+                            "Journey" and "Neural2" voices require a valid Google Cloud API Key with TTS enabled.
                         </p>
                     </div>
                 </div>
