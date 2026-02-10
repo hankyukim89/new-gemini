@@ -3,7 +3,7 @@ import { useChatStore, type MessageNode, type Attachment } from '../store/useCha
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePersonaStore } from '../store/usePersonaStore';
 import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS } from '../services/geminiService';
-import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings } from 'lucide-react';
+import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings, RotateCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -273,53 +273,81 @@ export const ChatArea: React.FC = () => {
             setInput('');
             setAttachments([]);
         }
-        setIsLoading(true);
-        setIsStreaming(true);
 
-        const systemPrompt = activePersona.systemPrompt;
-
-        let userMsgId: string | undefined;
-
-        // 1. Add User Message
+        // If editing, logic depends on Role
         if (editingNodeId && contentOverride) {
+            const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+            const editingNode = session?.messages[editingNodeId];
+            
             useChatStore.getState().editMessage(currentSessionId, editingNodeId, messageContent);
             setEditingNodeId(null);
             setEditContent('');
+
+            // Only regenerate if we edited a USER message
+            if (editingNode?.role === 'user') {
+                 await generateResponse();
+            }
         } else {
+             // New Message
             useChatStore.getState().addMessage(currentSessionId, 'user', messageContent, currentAttachments);
+            await generateResponse();
         }
+    };
 
-        // 2. Prepare History
-        const sess = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
-        if (!sess || !sess.currentLeafId) return;
+    const handleRegenerate = async (messageId: string) => {
+        if (!currentSessionId) return;
+        const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+        if (!session) return;
 
-        const newThread: MessageNode[] = [];
-        let curr: string | null = sess.currentLeafId;
-        while (curr) {
-            const n: MessageNode = sess.messages[curr];
-            if (n) { newThread.unshift(n); curr = n.parentId; } else break;
-        }
+        const message = session.messages[messageId];
+        if (!message || !message.parentId) return;
 
-        const apiHistory = [
-            { role: 'user', content: `System Instruction: ${systemPrompt}` },
-            ...newThread.map(m => ({ role: m.role, content: m.content, attachments: m.attachments }))
-        ];
+        // 1. Navigate to parent (User Message)
+        useChatStore.setState(state => {
+             const sess = state.sessions.find(s => s.id === currentSessionId);
+             if (sess) {
+                  sess.currentLeafId = message.parentId; 
+                  return { ...state };
+             }
+             return state;
+        });
 
-        // 3. Create Placeholder for Model Response
-        useChatStore.getState().addMessage(currentSessionId, 'model', '...');
-        const updatedSess = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
-        const modelNodeId = updatedSess?.currentLeafId;
+        // 2. Trigger Generation
+        await generateResponse();
+    };
 
-        if (!modelNodeId) {
+    // Helper to generate response from the current state of the session
+    const generateResponse = async () => {
+        setIsLoading(true);
+        setIsStreaming(true);
+
+        const currentSession = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+        if (!currentSession || !currentSession.currentLeafId || !activePersona) {
             setIsLoading(false);
             setIsStreaming(false);
             return;
         }
 
+        // 1. Build History
+        const thread: MessageNode[] = [];
+        let curr: string | null = currentSession.currentLeafId;
+        while (curr) {
+            const n: MessageNode = currentSession.messages[curr];
+            if (n) { thread.unshift(n); curr = n.parentId; } else break;
+        }
+
+        const apiHistory = [
+            { role: 'user', content: `System Instruction: ${activePersona.systemPrompt}` },
+            ...thread.map(m => ({ role: m.role, content: m.content, attachments: m.attachments }))
+        ];
+
+        // 2. Create Placeholder for Model Response
+        const modelNodeId = useChatStore.getState().addMessage(currentSessionId!, 'model', '...');
+        
+        // 3. Stream Response
         setStreamingNodeId(modelNodeId);
         setStreamingContent('');
-
-        // 4. Stream Response
+        
         abortControllerRef.current = new AbortController();
 
         try {
@@ -342,46 +370,33 @@ export const ChatArea: React.FC = () => {
 
                 // Chat Mode Splitting Logic
                 if (activePersona.isChatMode) {
-                    // Check for sentence endings (. ? !) followed by whitespace.
-                    // We removed the (?=[A-Z"]) lookahead to support casual lowercase chat.
-                    // We must also ensure we don't split inside a code block.
-
                     let searchStartIndex = 0;
                     while (true) {
-                        // Search in the remaining text
                         const remainingText = currentAccruedText.slice(searchStartIndex);
                         const splitMatch = remainingText.match(/([.!?])\s+/);
+                        
+                        if (!splitMatch) break; 
 
-                        if (!splitMatch) break; // No more sentence endings found
-
-                        const relativeIndex = splitMatch.index!;
+                        const relativeIndex = splitMatch.index!; 
                         const absoluteIndex = searchStartIndex + relativeIndex;
                         const puncIndex = absoluteIndex + 1;
 
                         const potentialFirstPart = currentAccruedText.slice(0, puncIndex);
-
-                        // Check if we are inside a code block (odd number of backticks)
                         const backtickCount = (potentialFirstPart.match(/`/g) || []).length;
                         const isInsideCode = backtickCount % 2 !== 0;
 
                         if (!isInsideCode) {
-                            // Safe to split
                             const firstPart = potentialFirstPart;
                             const remainder = currentAccruedText.slice(puncIndex).trimStart();
+                            
+                            useChatStore.getState().updateMessageContent(currentSessionId!, currentMsgId, firstPart);
 
-                            // 1. Finalize current message
-                            useChatStore.getState().updateMessageContent(currentSessionId, currentMsgId, firstPart);
-
-                            // 2. Create new message
-                            const newMsgId = useChatStore.getState().addMessage(currentSessionId, 'model', '');
+                            const newMsgId = useChatStore.getState().addMessage(currentSessionId!, 'model', '');
                             currentMsgId = newMsgId;
                             currentAccruedText = remainder;
-
-                            // Reset search start for the new currentAccruedText
+                            
                             searchStartIndex = 0;
                         } else {
-                            // We are inside code, so this period is part of the code. 
-                            // Skip this match and search after it.
                             searchStartIndex = puncIndex;
                         }
                     }
@@ -389,12 +404,12 @@ export const ChatArea: React.FC = () => {
 
                 setStreamingNodeId(currentMsgId);
                 setStreamingContent(currentAccruedText);
-                useChatStore.getState().updateMessageContent(currentSessionId, currentMsgId, currentAccruedText);
+                useChatStore.getState().updateMessageContent(currentSessionId!, currentMsgId, currentAccruedText);
             }
 
         } catch (e: any) {
-            if (e.name !== 'AbortError') {
-                useChatStore.getState().addMessage(currentSessionId, 'model', `**Error**: ${e.message || e}`);
+             if (e.name !== 'AbortError') {
+                 useChatStore.getState().addMessage(currentSessionId!, 'model', `**Error**: ${e.message || e}`);
             }
         } finally {
             setIsLoading(false);
@@ -484,8 +499,8 @@ export const ChatArea: React.FC = () => {
                                             rows={3}
                                         />
                                         <div className="flex gap-2 mt-2 justify-end">
-                                            <button onClick={cancelEditing} className="px-3 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600">Cancel</button>
-                                            <button onClick={() => handleSend(editContent)} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500">Save & Submit</button>
+                                            <button onClick={cancelEditing} className="px-3 py-1 text-xs bg-gray-700 rounded hover:bg-gray-600 transition-colors">Cancel</button>
+                                            <button onClick={() => handleSend(editContent)} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors">Save</button>
                                         </div>
                                     </div>
                                 ) : (
@@ -571,24 +586,24 @@ export const ChatArea: React.FC = () => {
                                 )}
 
                                 {/* Message Controls (Nav + Edit/Speak) */}
-                                <div className={cn("flex items-center gap-2 -mt-1 select-none", msg.role === 'user' ? "justify-end" : "justify-start")}>
+                                <div className={cn("flex items-center gap-2 -mt-1 select-none h-6", msg.role === 'user' ? "justify-end" : "justify-start")}>
                                     {/* Navigation */}
                                     {showNav && (
-                                        <div className="flex items-center bg-gray-800 rounded-lg p-1 text-xs font-mono text-gray-400">
+                                        <div className="flex items-center text-xs font-medium text-gray-500">
                                             <button
                                                 onClick={() => navigateBranch(currentSessionId, msg.id, 'prev')}
                                                 disabled={currentSiblingIndex === 0}
-                                                className="p-1 hover:text-white disabled:opacity-30"
+                                                className="px-1 hover:text-gray-300 disabled:opacity-30 transition-colors"
                                             >
-                                                <ChevronLeft className="w-4 h-4" />
+                                                &lt;
                                             </button>
-                                            <span className="mx-2">{currentSiblingIndex + 1} / {totalSiblings}</span>
+                                            <span className="mx-0.5">{currentSiblingIndex + 1}/{totalSiblings}</span>
                                             <button
                                                 onClick={() => navigateBranch(currentSessionId, msg.id, 'next')}
                                                 disabled={currentSiblingIndex === totalSiblings - 1}
-                                                className="p-1 hover:text-white disabled:opacity-30"
+                                                className="px-1 hover:text-gray-300 disabled:opacity-30 transition-colors"
                                             >
-                                                <ChevronRight className="w-4 h-4" />
+                                                &gt;
                                             </button>
                                         </div>
                                     )}
@@ -614,16 +629,39 @@ export const ChatArea: React.FC = () => {
                                             </>
                                         )}
                                         {msg.role === 'model' && (
-                                            <button
-                                                onClick={() => speakMessage(msg.content, msg.id)}
-                                                className={cn(
-                                                    "p-1 transition-colors",
-                                                    isSpeaking === msg.id ? "text-green-400 animate-pulse" : "text-gray-400 hover:text-white"
-                                                )}
-                                                title={isSpeaking === msg.id ? "Stop Speaking" : "Read Aloud"}
-                                            >
-                                                {isSpeaking === msg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Volume2 className="w-3.5 h-3.5" />}
-                                            </button>
+                                            <>
+                                                <button
+                                                    onClick={() => navigator.clipboard.writeText(msg.content)}
+                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                    title="Copy"
+                                                >
+                                                    <Copy className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleRegenerate(msg.id)}
+                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                    title="Retry"
+                                                >
+                                                    <RotateCw className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    onClick={() => startEditing(msg)}
+                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                    title="Edit Response"
+                                                >
+                                                    <Edit2 className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    onClick={() => speakMessage(msg.content, msg.id)}
+                                                    className={cn(
+                                                        "p-1 transition-colors",
+                                                        isSpeaking === msg.id ? "text-green-400 animate-pulse" : "text-gray-400 hover:text-white"
+                                                    )}
+                                                    title={isSpeaking === msg.id ? "Stop Speaking" : "Read Aloud"}
+                                                >
+                                                    {isSpeaking === msg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Volume2 className="w-3.5 h-3.5" />}
+                                                </button>
+                                            </>
                                         )}
                                     </div>
                                 </div>
