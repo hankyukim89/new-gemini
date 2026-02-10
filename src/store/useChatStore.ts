@@ -28,7 +28,7 @@ export interface ChatState {
     selectSession: (id: string) => void;
 
     // Core Tree Actions
-    addMessage: (sessionId: string, role: 'user' | 'model', content: string) => void;
+    addMessage: (sessionId: string, role: 'user' | 'model', content: string) => string;
     editMessage: (sessionId: string, originalMessageId: string, newContent: string) => void;
     updateMessageContent: (sessionId: string, messageId: string, newContent: string) => void; // In-place update for streaming
     navigateBranch: (sessionId: string, nodeId: string, direction: 'prev' | 'next') => void;
@@ -76,6 +76,7 @@ export const useChatStore = create<ChatState>()(
             selectSession: (id) => set({ currentSessionId: id }),
 
             addMessage: (sessionId, role, content) => {
+                const newMessageId = uuidv4();
                 set((state) => {
                     const sessionIndex = state.sessions.findIndex((s) => s.id === sessionId);
                     if (sessionIndex === -1) return state;
@@ -84,7 +85,7 @@ export const useChatStore = create<ChatState>()(
                     const parentId = session.currentLeafId; // Append to current leaf
 
                     const newMessage: MessageNode = {
-                        id: uuidv4(),
+                        id: newMessageId,
                         role,
                         content,
                         timestamp: Date.now(),
@@ -123,6 +124,7 @@ export const useChatStore = create<ChatState>()(
 
                     return { sessions: updatedSessions };
                 });
+                return newMessageId;
             },
 
             editMessage: (sessionId, originalMessageId, newContent) => {

@@ -143,6 +143,21 @@ export const PersonaSettingsModal: React.FC<PersonaSettingsModalProps> = ({ pers
                                 </select>
                             </div>
 
+                            <div className="flex items-center justify-between p-3 bg-gray-900 border border-gray-800 rounded-lg">
+                                <label className="flex items-center text-sm font-medium text-gray-400">
+                                    Chat Mode
+                                    <InfoTooltip text="Splits AI responses into separate messages based on sentences, simulating a real-time chat experience." />
+                                </label>
+                                <button
+                                    onClick={() => handleChange('isChatMode', !formData.isChatMode)}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${formData.isChatMode ? 'bg-blue-600' : 'bg-gray-700'}`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${formData.isChatMode ? 'translate-x-6' : 'translate-x-1'}`}
+                                    />
+                                </button>
+                            </div>
+
                             <div className="space-y-3">
                                 <label className="flex items-center text-sm font-medium text-gray-400">
                                     Temperature

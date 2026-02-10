@@ -3,17 +3,23 @@ import { useUsageStore } from "../store/useUsageStore";
 
 // --- STRICT Model List ---
 export const PLAYGROUND_MODELS = [
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro' },
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-    { id: 'gemini-exp-1206', name: 'Gemini Experimental 1206' },
-    { id: 'nano-banana-pro-preview', name: 'Nano Banana Pro' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' },
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+    { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash-Lite' },
 ];
 
 export const MODEL_LIMITS: Record<string, number> = {
+    'gemini-3-pro-preview': 1048576,
+    'gemini-3-flash-preview': 1048576,
+    'gemini-2.5-pro': 1048576,
+    'gemini-2.5-flash': 1048576,
+    'gemini-2.5-flash-lite': 1048576,
     'gemini-2.0-flash': 1048576,
-    'gemini-2.5-pro': 2097152,
-    'gemini-exp-1206': 1048576,
-    'nano-banana-pro-preview': 32768,
+    'gemini-2.0-flash-lite': 1048576,
 };
 
 export interface ServiceResponse {

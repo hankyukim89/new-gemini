@@ -17,6 +17,7 @@ export interface Persona {
     systemPrompt: string;
     avatar?: string;
     config: PersonaConfig;
+    isChatMode?: boolean;
 }
 
 export interface PersonaState {

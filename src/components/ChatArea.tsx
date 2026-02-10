@@ -246,16 +246,90 @@ export const ChatArea: React.FC = () => {
             );
 
             let fullText = '';
+            let currentMessageId = modelNodeId;
+            let buffer = '';
 
             for await (const chunk of stream) {
                 if (abortControllerRef.current?.signal.aborted) {
                     break;
                 }
 
-                fullText += chunk;
-                setStreamingContent(fullText);
-                useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, fullText);
+                if (activePersona.isChatMode) {
+                    buffer += chunk;
+                    // Split by sentence endings (. ? !), but keep the delimiter to check, then remove it
+                    // Regex: Match (. or ? or !) followed by (whitespace or end of string)
+                    // We need to be careful not to split on abbreviations like "Mr." but simple split for now
+                    // let's iterate through the buffer and find split points
+
+                    let remainingCheck = buffer;
+                    while (true) {
+                        // Find the first delimiter that is followed by space or end
+                        const match = remainingCheck.match(/([.?!])(\s+|$)/);
+                        if (!match || typeof match.index === 'undefined') {
+                            break;
+                        }
+
+                        // We found a sentence end
+                        const delimiterIndex = match.index;
+                        const delimiter = match[1];
+                        const splitPoint = delimiterIndex + 1; // Include the delimiter in the first part? User said REMOVE periods.
+
+                        // "nah man. i got 3 dollars." -> "nah man"
+                        // User wants NO periods at the end.
+
+                        const sentenceWithDelimiter = remainingCheck.substring(0, splitPoint);
+                        const sentenceClean = sentenceWithDelimiter.slice(0, -1).trim(); // Remove the last char (delimiter)
+
+                        // Update current message with this sentence
+                        useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, sentenceClean);
+
+                        // Create NEW message for the next part
+                        currentMessageId = useChatStore.getState().addMessage(currentSessionId, 'model', '...');
+                        setStreamingNodeId(currentMessageId);
+
+                        // Remove processed part from buffer
+                        remainingCheck = remainingCheck.substring(splitPoint);
+                    }
+
+                    buffer = remainingCheck;
+                    // Update the CURRENT "..." message with the remaining buffer so the user sees typing
+                    if (buffer) {
+                        useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, buffer);
+                        setStreamingContent(buffer); // For local view if needed, but redundant with store update
+                    }
+
+                } else {
+                    fullText += chunk;
+                    setStreamingContent(fullText);
+                    useChatStore.getState().updateMessageContent(currentSessionId, modelNodeId, fullText);
+                }
             }
+
+            // Final cleanup for Chat Mode
+            if (activePersona.isChatMode) {
+                if (buffer.trim()) {
+                    // Final update for the last chunk
+                    useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, buffer.trim());
+                } else {
+                    // Buffer is empty, so the current "..." message is redundant. Remove it.
+                    // We need a deleteMessage action or some way to handle this.
+                    // For now, let's just update it to empty? No, better to remove.
+                    // Since we don't have deleteMessage exposed in store easily here without potentially breaking tree,
+                    // let's just leave it empty string? But empty bubbles look bad.
+                    // Let's implement a quick fix: If content is "...", set it to empty string, and UI should hide empty messages?
+                    // Or better: update with empty string and we filter empty messages in UI?
+
+                    // Helper: Check if the message content is still "..."
+                    const verifyNode = useChatStore.getState().sessions.find(s => s.id === currentSessionId)?.messages[currentMessageId];
+                    if (verifyNode && verifyNode.content === '...') {
+                        // It's a dummy node.
+                        // Ideally we delete it. But since `deleteMessage` isn't in our destructured props, let's just make it empty.
+                        // And in the UI render, we can hide empty messages.
+                        useChatStore.getState().updateMessageContent(currentSessionId, currentMessageId, '');
+                    }
+                }
+            }
+
         } catch (e: any) {
             if (e.name !== 'AbortError') {
                 useChatStore.getState().addMessage(currentSessionId, 'model', `**Error**: ${e.message || e}`);
@@ -307,7 +381,7 @@ export const ChatArea: React.FC = () => {
                     </div>
                 )}
 
-                {thread.map((msg) => {
+                {thread.filter(m => m.content && m.content.trim() !== '' && m.content !== '...').map((msg) => {
                     const parentId = msg.parentId;
                     const parent = parentId && currentSession ? currentSession.messages[parentId] : null;
                     const siblings = parent ? parent.childrenIds : (currentSession?.rootMessageIds || []);
@@ -412,26 +486,26 @@ export const ChatArea: React.FC = () => {
                                     )}
 
                                     {/* Actions */}
-                                    <div className="flex items-center gap-1">
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         {msg.role === 'user' && (
                                             <button
                                                 onClick={() => startEditing(msg)}
-                                                className="p-2 text-gray-500 hover:text-white bg-gray-800 rounded-lg transition-colors"
+                                                className="p-1 text-gray-400 hover:text-white transition-colors"
                                                 title="Edit Message"
                                             >
-                                                <Edit2 className="w-4 h-4" />
+                                                <Edit2 className="w-3.5 h-3.5" />
                                             </button>
                                         )}
                                         {msg.role === 'model' && (
                                             <button
                                                 onClick={() => speakMessage(msg.content, msg.id)}
                                                 className={cn(
-                                                    "p-2 bg-gray-800 rounded-lg transition-colors",
-                                                    isSpeaking === msg.id ? "text-green-400 animate-pulse" : "text-gray-500 hover:text-white"
+                                                    "p-1 transition-colors",
+                                                    isSpeaking === msg.id ? "text-green-400 animate-pulse" : "text-gray-400 hover:text-white"
                                                 )}
                                                 title={isSpeaking === msg.id ? "Stop Speaking" : "Read Aloud"}
                                             >
-                                                {isSpeaking === msg.id ? <Loader2 className="w-5 h-5 animate-spin" /> : <Volume2 className="w-5 h-5" />}
+                                                {isSpeaking === msg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Volume2 className="w-3.5 h-3.5" />}
                                             </button>
                                         )}
                                     </div>
