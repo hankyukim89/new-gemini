@@ -42,6 +42,7 @@ export interface ChatState {
     editMessage: (sessionId: string, originalMessageId: string, newContent: string) => void;
     updateMessageContent: (sessionId: string, messageId: string, newContent: string) => void; // In-place update for streaming
     navigateBranch: (sessionId: string, nodeId: string, direction: 'prev' | 'next') => void;
+    renameSession: (sessionId: string, newTitle: string) => void;
 
     deleteSession: (id: string) => void;
     clearSessions: () => void;
@@ -250,6 +251,14 @@ export const useChatStore = create<ChatState>()(
 
                     return { sessions: updatedSessions };
                 });
+            },
+
+            renameSession: (sessionId: string, newTitle: string) => {
+                set((state) => ({
+                    sessions: state.sessions.map((s) =>
+                        s.id === sessionId ? { ...s, title: newTitle } : s
+                    ),
+                }));
             },
 
             deleteSession: (id) =>

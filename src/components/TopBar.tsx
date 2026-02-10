@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { usePersonaStore } from '../store/usePersonaStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { UsageTracker } from './UsageTracker';
@@ -21,6 +21,23 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenPersonaManager, onOpenSett
     const { apiKey } = useSettingsStore();
 
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsDropdownOpen(false);
+            }
+        };
+
+        if (isDropdownOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isDropdownOpen]);
 
     const activePersona = personas.find(p => p.id === activePersonaId) || personas[0];
     const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -52,7 +69,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenPersonaManager, onOpenSett
     return (
         <div className="h-16 border-b border-gray-800 bg-[#0f111a]/80 backdrop-blur-md flex items-center justify-between px-6 z-20 sticky top-0">
             {/* Left: Persona Selector */}
-            <div className="relative">
+            <div className="relative" ref={dropdownRef}>
                 <button
                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                     className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-800 transition-all text-gray-200 hover:text-white"
@@ -144,10 +161,7 @@ export const TopBar: React.FC<TopBarProps> = ({ onOpenPersonaManager, onOpenSett
                 </button>
             </div>
 
-            {/* Overlay for dropdown close */}
-            {isDropdownOpen && (
-                <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)} />
-            )}
+
         </div>
     );
 };
