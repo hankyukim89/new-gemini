@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore, type MessageNode, type Attachment } from '../store/useChatStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePersonaStore } from '../store/usePersonaStore';
-import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS, checkGrammar, translateText, defineWord } from '../services/geminiService';
+import { sendMessageStream, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS, checkGrammar, translateText, defineWord } from '../services/geminiService';
 import { localWhisperService } from '../services/localWhisperService';
-import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings, RotateCw, BookOpen, Globe } from 'lucide-react';
+import { Send, User as UserIcon, Bot, AlertTriangle, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, FileText, Plus, RotateCw, Globe } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -63,7 +63,7 @@ const CodeBlock = ({ className, children, ...props }: any) => {
 };
 
 export const ChatArea: React.FC = () => {
-    const { currentSessionId, sessions, addMessage, addSession, navigateBranch, setTranslation } = useChatStore();
+    const { currentSessionId, sessions, addSession, navigateBranch, setTranslation } = useChatStore();
     const { apiKey, ttsVoice } = useSettingsStore();
     const { personas, activePersonaId } = usePersonaStore();
 
@@ -80,17 +80,17 @@ export const ChatArea: React.FC = () => {
     const [attachments, setAttachments] = useState<Attachment[]>([]);
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
 
     // Translation / Definition State
     const [definitionHover, setDefinitionHover] = useState<{ x: number, y: number, html: string } | null>(null);
-    const [isLoadingDefinition, setIsLoadingDefinition] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // PTT Refs
-    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, pushToTalkTranslateKey, autoSpeak, enableGrammarCheck, apiKey: settingsApiKey, enableTranslation, targetLanguage, sourceLanguage } = useSettingsStore();
+    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, pushToTalkTranslateKey, enableGrammarCheck, apiKey: settingsApiKey, enableTranslation, targetLanguage, sourceLanguage } = useSettingsStore();
     const isPTTKeyDown = useRef(false);
     const isPTTRedoKeyDown = useRef(false);
     const initialInputRef = useRef('');
@@ -115,7 +115,7 @@ export const ChatArea: React.FC = () => {
         const contextMessages: { role: string; content: string }[] = [];
         let curr: string | null = message.parentId;
         while (curr) {
-            const n = session.messages[curr];
+            const n: MessageNode = session.messages[curr];
             if (n) {
                 contextMessages.unshift({ role: n.role, content: n.content });
                 curr = n.parentId;
@@ -888,6 +888,12 @@ export const ChatArea: React.FC = () => {
         }
     };
 
+    useEffect(() => {
+        if (!isLoading && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [isLoading]);
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -1284,6 +1290,7 @@ export const ChatArea: React.FC = () => {
 
                         <div className="flex-1 relative">
                             <textarea
+                                ref={inputRef}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleKeyDown}
