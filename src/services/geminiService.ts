@@ -301,13 +301,21 @@ export const translateText = async (
 
     try {
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+        // Upgraded to standard Flash for better quality
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
         const prompt = `
+        You are a professional translator.
         Translate the following text into ${targetLanguage}.
-        Return ONLY the translation, nothing else. No preamble.
+        
+        Guidelines:
+        - Detect the source language automatically.
+        - Produce a natural, idiomatic translation that conveys the original meaning and tone.
+        - Do NOT explain the translation.
+        - Return ONLY the translated text.
 
-        Text: "${text}"
+        Text to Translate:
+        "${text}"
         `;
 
         const result = await model.generateContent(prompt);

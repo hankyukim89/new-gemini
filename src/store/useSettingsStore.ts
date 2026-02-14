@@ -18,10 +18,14 @@ export interface SettingsState {
     setPushToTalkKey: (value: string) => void;
     pushToTalkRedoKey: string;
     setPushToTalkRedoKey: (value: string) => void;
+    pushToTalkTranslateKey: string;
+    setPushToTalkTranslateKey: (value: string) => void;
     enableTranslation: boolean;
     setEnableTranslation: (value: boolean) => void;
     targetLanguage: string;
     setTargetLanguage: (value: string) => void;
+    sourceLanguage: string;
+    setSourceLanguage: (value: string) => void;
     isSidebarCollapsed: boolean;
     toggleSidebar: () => void;
 }
@@ -37,6 +41,7 @@ export const useSettingsStore = create<SettingsState>()(
             usePushToTalk: false,
             pushToTalkKey: 'Space', // Default to Spacebar
             pushToTalkRedoKey: 'KeyR', // Default to R key
+            pushToTalkTranslateKey: 'KeyT', // Default to T
             setApiKey: (apiKey) => set({ apiKey }),
             setTtsVoice: (ttsVoice) => set({ ttsVoice }),
             setUseOfflineSTT: (useOfflineSTT) => set({ useOfflineSTT }),
@@ -46,10 +51,13 @@ export const useSettingsStore = create<SettingsState>()(
             setUsePushToTalk: (usePushToTalk) => set({ usePushToTalk }),
             setPushToTalkKey: (pushToTalkKey) => set({ pushToTalkKey }),
             setPushToTalkRedoKey: (pushToTalkRedoKey) => set({ pushToTalkRedoKey }),
+            setPushToTalkTranslateKey: (pushToTalkTranslateKey) => set({ pushToTalkTranslateKey }),
             enableTranslation: false,
             setEnableTranslation: (enableTranslation) => set({ enableTranslation }),
             targetLanguage: 'Spanish',
             setTargetLanguage: (targetLanguage) => set({ targetLanguage }),
+            sourceLanguage: 'en-US',
+            setSourceLanguage: (sourceLanguage) => set({ sourceLanguage }),
             toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
         }),
         {

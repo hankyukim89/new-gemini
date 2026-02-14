@@ -90,13 +90,16 @@ export const ChatArea: React.FC = () => {
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // PTT Refs
-    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, autoSpeak, enableGrammarCheck, apiKey: settingsApiKey, enableTranslation, targetLanguage } = useSettingsStore();
+    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, pushToTalkTranslateKey, autoSpeak, enableGrammarCheck, apiKey: settingsApiKey, enableTranslation, targetLanguage, sourceLanguage } = useSettingsStore();
     const isPTTKeyDown = useRef(false);
     const isPTTRedoKeyDown = useRef(false);
     const initialInputRef = useRef('');
     const latestTranscriptRef = useRef('');
     const pttActiveRef = useRef(false); // Tracks if this STT session was started by PTT
     const pttRedoActiveRef = useRef(false); // Tracks if this STT session is a redo
+    const pttTranslateActiveRef = useRef(false);
+    const isPTTTranslateKeyDown = useRef(false);
+    const toggleListeningRef = useRef<(() => void) | null>(null);
     const isListeningRef = useRef(false);
 
     const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -190,29 +193,69 @@ export const ChatArea: React.FC = () => {
         }
     };
 
-    // --- Push-to-Talk Logic ---
-    // Ref for toggleListening (assigned after function definition below)
-    const toggleListeningRef = useRef<(() => void) | null>(null);
+
 
     useEffect(() => {
         if (!usePushToTalk) return;
+
+        const playTock = () => {
+            try {
+                const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+                if (!AudioContextClass) return;
+                const context = new AudioContextClass();
+                const oscillator = context.createOscillator();
+                const gain = context.createGain();
+
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(150, context.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(40, context.currentTime + 0.1);
+
+                gain.gain.setValueAtTime(0.1, context.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.1);
+
+                oscillator.connect(gain);
+                gain.connect(context.destination);
+
+                oscillator.start();
+                oscillator.stop(context.currentTime + 0.1);
+
+                setTimeout(() => {
+                    if (context.state !== 'closed') context.close();
+                }, 500);
+            } catch (e) {
+                // Silently fail if audio context is blocked
+            }
+        };
 
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.repeat) return;
             const isRedoKey = e.code === (pushToTalkRedoKey || 'KeyR');
             const isSendKey = e.code === (pushToTalkKey || 'Space');
+            const isTranslateKey = e.code === (pushToTalkTranslateKey || 'KeyT');
 
-            if ((isSendKey || isRedoKey) && !isPTTKeyDown.current && !isPTTRedoKeyDown.current) {
-                stopSpeech(); // Stop TTS immediately when PTT starts
+            if ((isSendKey || isRedoKey || isTranslateKey) &&
+                !isPTTKeyDown.current && !isPTTRedoKeyDown.current && !isPTTTranslateKeyDown.current) {
+
+                stopSpeech(); // Stop TTS immediately
+                playTock();   // Sound feedback
+
+                // Prevent scrolling if Space is used, unless typing
                 if (document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
-                    e.preventDefault();
+                    if (isSendKey || isTranslateKey) e.preventDefault();
                 }
+
                 if (isRedoKey) {
                     isPTTRedoKeyDown.current = true;
-                    pttRedoActiveRef.current = true; // Mark as redo session
+                    pttRedoActiveRef.current = true;
+                } else if (isTranslateKey) {
+                    if (!enableTranslation) return; // Ignore if disabled
+                    isPTTTranslateKeyDown.current = true;
+                    pttTranslateActiveRef.current = true;
                 } else {
                     isPTTKeyDown.current = true;
+                    pttActiveRef.current = true;
                 }
+
                 if (!isListeningRef.current) {
                     toggleListeningRef.current?.();
                 }
@@ -222,18 +265,19 @@ export const ChatArea: React.FC = () => {
         const handleKeyUp = (e: KeyboardEvent) => {
             const isRedoKey = e.code === (pushToTalkRedoKey || 'KeyR');
             const isSendKey = e.code === (pushToTalkKey || 'Space');
+            const isTranslateKey = e.code === (pushToTalkTranslateKey || 'KeyT');
 
             if (isSendKey && isPTTKeyDown.current) {
                 isPTTKeyDown.current = false;
-                if (isListeningRef.current) {
-                    toggleListeningRef.current?.();
-                }
+                if (isListeningRef.current) toggleListeningRef.current?.();
             }
             if (isRedoKey && isPTTRedoKeyDown.current) {
                 isPTTRedoKeyDown.current = false;
-                if (isListeningRef.current) {
-                    toggleListeningRef.current?.();
-                }
+                if (isListeningRef.current) toggleListeningRef.current?.();
+            }
+            if (isTranslateKey && isPTTTranslateKeyDown.current) {
+                isPTTTranslateKeyDown.current = false;
+                if (isListeningRef.current) toggleListeningRef.current?.();
             }
         };
 
@@ -244,7 +288,7 @@ export const ChatArea: React.FC = () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, [usePushToTalk, pushToTalkKey, pushToTalkRedoKey]);
+    }, [usePushToTalk, pushToTalkKey, pushToTalkRedoKey, pushToTalkTranslateKey, enableTranslation]);
 
     // --- Tree Traversal & Thread Construction ---
     const thread: MessageNode[] = [];
@@ -454,6 +498,25 @@ export const ChatArea: React.FC = () => {
                                             setTimeout(() => generateResponse(), 100);
                                         }
                                     }
+                                } else if (pttTranslateActiveRef.current) {
+                                    // Translate & Send Logic
+                                    pttTranslateActiveRef.current = false;
+                                    setInput('');
+                                    const { apiKey, enableTranslation, targetLanguage } = useSettingsStore.getState();
+
+                                    if (apiKey && enableTranslation) {
+                                        // We need to handle this async but we are in a non-async callback context mostly
+                                        // But this func is async so we can use translateText promise
+                                        // Actually localWhisperService.transcribe is awaited above.
+                                        try {
+                                            const translated = await translateText(combinedText, targetLanguage, apiKey);
+                                            handleSend(translated || combinedText, combinedText);
+                                        } catch (e) {
+                                            handleSend(combinedText);
+                                        }
+                                    } else {
+                                        handleSend(combinedText);
+                                    }
                                 } else {
                                     setInput(''); // Clear input before send
                                     handleSend(combinedText);
@@ -491,10 +554,13 @@ export const ChatArea: React.FC = () => {
             const recognition = new SpeechRecognition();
             recognition.continuous = true; // Keep listening until we explicitly stop
             recognition.interimResults = true;
-            recognition.lang = 'en-US';
+            recognition.lang = sourceLanguage || 'en-US';
 
             // Track if this is a PTT session
-            pttActiveRef.current = usePushToTalk;
+            // Only strictly enable standard PTT if other special modes aren't active
+            if (!pttRedoActiveRef.current && !pttTranslateActiveRef.current) {
+                pttActiveRef.current = usePushToTalk;
+            }
 
             recognition.onresult = (event: any) => {
                 const currentResult = event.results[event.results.length - 1];
@@ -522,16 +588,29 @@ export const ChatArea: React.FC = () => {
                 setIsTranscribing(false);
 
                 // If this was a PTT session, auto-send or redo
-                if (pttActiveRef.current || pttRedoActiveRef.current) {
+                if (pttActiveRef.current || pttRedoActiveRef.current || pttTranslateActiveRef.current) {
                     const isRedo = pttRedoActiveRef.current;
+                    const isTranslate = pttTranslateActiveRef.current;
+
                     pttActiveRef.current = false;
                     pttRedoActiveRef.current = false;
+                    pttTranslateActiveRef.current = false;
+
                     const textToSend = latestTranscriptRef.current;
                     if (textToSend.trim()) {
                         latestTranscriptRef.current = '';
                         setInput(''); // Clear input box
 
-                        if (isRedo) {
+                        if (isTranslate) {
+                            const { apiKey, enableTranslation, targetLanguage } = useSettingsStore.getState();
+                            if (apiKey && enableTranslation) {
+                                translateText(textToSend, targetLanguage, apiKey).then(translated => {
+                                    handleSend(translated || textToSend, textToSend);
+                                });
+                            } else {
+                                handleSend(textToSend);
+                            }
+                        } else if (isRedo) {
                             // Redo: edit last user message and regenerate
                             setTimeout(() => {
                                 const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
@@ -589,7 +668,7 @@ export const ChatArea: React.FC = () => {
         }
     };
 
-    const handleSend = async (contentOverride?: string) => {
+    const handleSend = async (contentOverride?: string, originalText?: string) => {
         const messageContent = contentOverride || input;
         const currentAttachments = contentOverride ? [] : attachments; // Only use attachments for new messages
 
@@ -624,7 +703,7 @@ export const ChatArea: React.FC = () => {
             }
         } else {
             // New Message
-            const userMsgId = useChatStore.getState().addMessage(currentSessionId, 'user', messageContent, currentAttachments);
+            const userMsgId = useChatStore.getState().addMessage(currentSessionId, 'user', messageContent, currentAttachments, originalText);
 
             // Trigger grammar check in background (don't await)
             if (enableGrammarCheck && settingsApiKey) {
@@ -943,6 +1022,17 @@ export const ChatArea: React.FC = () => {
                                                         </div>
                                                     )}
 
+                                                    {msg.originalText && (
+                                                        <div className="mb-4 p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-sm self-stretch text-left">
+                                                            <div className="flex items-center gap-1.5 mb-1.5">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-blue-300/50 animate-pulse" />
+                                                                <span className="text-[10px] text-white/40 font-bold uppercase tracking-widest">Captured Input</span>
+                                                            </div>
+                                                            <div className="text-sm text-white/90 leading-relaxed italic font-serif">
+                                                                "{msg.originalText}"
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     {msg.content.startsWith('**Error**') && <AlertTriangle className="w-4 h-4 mb-2 text-red-400" />}
                                                     <div className="prose prose-invert prose-sm max-w-none prose-chat">
                                                         <ReactMarkdown

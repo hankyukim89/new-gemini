@@ -15,6 +15,7 @@ export interface MessageNode {
     id: string;
     role: 'user' | 'model';
     content: string;
+    originalText?: string; // Original spoken text before translation
     attachments?: Attachment[];
     grammarCorrection?: string; // HTML string with correction markup
     translation?: string; // Translated text
@@ -40,7 +41,7 @@ export interface ChatState {
     selectSession: (id: string) => void;
 
     // Core Tree Actions
-    addMessage: (sessionId: string, role: 'user' | 'model', content: string, attachments?: Attachment[]) => string;
+    addMessage: (sessionId: string, role: 'user' | 'model', content: string, attachments?: Attachment[], originalText?: string) => string;
     editMessage: (sessionId: string, originalMessageId: string, newContent: string) => void;
     updateMessageContent: (sessionId: string, messageId: string, newContent: string) => void; // In-place update for streaming
     setGrammarCorrection: (sessionId: string, messageId: string, correction: string) => void;
@@ -90,7 +91,7 @@ export const useChatStore = create<ChatState>()(
             },
             selectSession: (id) => set({ currentSessionId: id }),
 
-            addMessage: (sessionId, role, content, attachments = []) => {
+            addMessage: (sessionId, role, content, attachments = [], originalText) => {
                 const newMessageId = uuidv4();
                 set((state) => {
                     const sessionIndex = state.sessions.findIndex((s) => s.id === sessionId);
@@ -103,6 +104,7 @@ export const useChatStore = create<ChatState>()(
                         id: newMessageId,
                         role,
                         content,
+                        originalText,
                         attachments,
                         timestamp: Date.now(),
                         parentId: parentId,
