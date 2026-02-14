@@ -190,101 +190,37 @@ export const sendMessageStream = async function* (
     }
 };
 
-// --- Google Cloud TTS API ---
-// --- Browser Native TTS ---
-import { useSettingsStore } from "../store/useSettingsStore";
+// --- Browser Native TTS (Free, No API Required) ---
 
-// ... existing imports ...
-
-// ... (keep Model constants) ...
-
-// ... (keep sendMessageToGemini) ...
-
-// ... (keep sendMessageStream) ...
-
-// --- Google Cloud TTS API & Browser Native TTS ---
 export const synthesizeSpeech = async (text: string, voiceURI: string): Promise<void> => {
-    // 1. Check if it's a Google Cloud Voice (Standard/Premium)
-    // Cloud voices in our list look like: "en-US-Journey-D", "en-GB-Neural2-A", etc.
-    const isCloudVoice = voiceURI.includes('Journey') || voiceURI.includes('Neural2') || voiceURI.includes('Standard') || voiceURI.includes('Wavenet');
-
-    if (isCloudVoice) {
-        const apiKey = useSettingsStore.getState().apiKey;
-        if (!apiKey) {
-            throw new Error("API Key required for Cloud TTS");
-        }
-
-        try {
-            const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    input: { text },
-                    voice: { languageCode: voiceURI.split('-').slice(0, 2).join('-'), name: voiceURI },
-                    audioConfig: { audioEncoding: 'MP3' },
-                }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error?.message || "TTS API Request failed");
-            }
-
-            const data = await response.json();
-            const audioContent = data.audioContent;
-
-            if (!audioContent) {
-                throw new Error("No audio content received");
-            }
-
-            // Play the audio
-            const audio = new Audio(`data:audio/mp3;base64,${audioContent}`);
-            await new Promise<void>((resolve, reject) => {
-                audio.onended = () => resolve();
-                audio.onerror = (e) => reject(e);
-                audio.play().catch(reject);
-            });
-            return;
-
-        } catch (error) {
-            console.warn("Cloud TTS failed, falling back to browser:", error);
-            // Fallback: Proceed to Browser Native TTS below
-            // We just don't return here, letting code execution continue to step 2.
-        }
-    }
-
-    // 2. Browser Native TTS (Fallback or Explicit Selection)
     return new Promise((resolve, reject) => {
         if (!window.speechSynthesis) {
             console.error("Browser does not support TTS");
-            // If we are here after a Cloud error, we should probably just resolve to avoid crashing app flow
             resolve();
             return;
         }
 
-        // If we are falling back from Cloud, 'voiceURI' (e.g. 'en-US-Journey-D') won't match any browser voice.
-        // This means 'selectedVoice' will be undefined, and utterance will use the system default.
-        // This is exactly what we want for a fallback.
+        // Cancel any ongoing speech
+        window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
 
-        // Find the voice by URI or Name
+        // Find the selected voice by URI or name
         const voices = window.speechSynthesis.getVoices();
         const selectedVoice = voices.find(v => v.voiceURI === voiceURI || v.name === voiceURI);
 
         if (selectedVoice) {
             utterance.voice = selectedVoice;
+        } else if (voices.length > 0) {
+            // Fallback: pick a good English voice
+            const fallback = voices.find(v => v.lang === 'en-US') || voices[0];
+            utterance.voice = fallback;
         }
-
-        // If falling back, maybe speed it up slightly or ensure it's English if possible?
-        // simple default is fine.
 
         utterance.onend = () => resolve();
         utterance.onerror = (e) => {
             console.error("Browser TTS Error:", e);
-            reject(e);
+            resolve(); // Don't crash, just silently fail
         };
 
         window.speechSynthesis.speak(utterance);
@@ -300,4 +236,52 @@ export const stopSpeech = () => {
 export const getBrowserVoices = (): SpeechSynthesisVoice[] => {
     if (!window.speechSynthesis) return [];
     return window.speechSynthesis.getVoices();
+};
+
+
+export const checkGrammar = async (
+    text: string,
+    apiKey: string
+): Promise<string | null> => {
+    // console.log("checkGrammar called for text length:", text.length);
+    if (!text || text.trim().length < 2) return null;
+
+    try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        // Use a fast, lightweight model for background checks
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+
+        const prompt = `
+        You are a helpful grammar assistant.
+        Check the following text for grammar, spelling, and word choice errors.
+        
+        Rules:
+        1. If the text is natural and grammatically correct, return ONLY the string: NO_ERRORS
+        2. If there are mistakes, provide specific HTML output:
+           - <b>Corrected:</b> [The corrected sentence]
+           - <br>
+           - <i>[Optional 1-sentence explanation if needed]</i>
+        
+        Do not use markdown blocks. Do not use <ul> or <li> unless absolutely necessary for multiple unrelated errors.
+        Keep it simple and direct.
+
+        Text to check: "${text}"
+        `;
+
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        let correction = response.text().trim();
+
+        // Clean up markdown block if present
+        correction = correction.replace(/^```html/, '').replace(/```$/, '').trim();
+
+        if (correction.includes('NO_ERRORS')) {
+            return null;
+        }
+
+        return correction;
+    } catch (error) {
+        console.error("Grammar Check Error:", error);
+        return null;
+    }
 };

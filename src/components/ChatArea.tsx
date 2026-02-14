@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore, type MessageNode, type Attachment } from '../store/useChatStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePersonaStore } from '../store/usePersonaStore';
-import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS } from '../services/geminiService';
-import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings, RotateCw } from 'lucide-react';
+import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS, checkGrammar } from '../services/geminiService';
+import { localWhisperService } from '../services/localWhisperService';
+import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings, RotateCw, BookOpen } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -18,6 +19,7 @@ interface SpeechRecognition extends EventTarget {
     stop: () => void;
     onresult: (event: any) => void;
     onend: () => void;
+    onerror: (event: any) => void;
 }
 declare global {
     interface Window {
@@ -72,6 +74,7 @@ export const ChatArea: React.FC = () => {
     const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
     const [editContent, setEditContent] = useState('');
     const [isListening, setIsListening] = useState(false);
+    const [isTranscribing, setIsTranscribing] = useState(false);
     const [streamingNodeId, setStreamingNodeId] = useState<string | null>(null);
     const [streamingContent, setStreamingContent] = useState('');
     const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -82,8 +85,74 @@ export const ChatArea: React.FC = () => {
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
+    // PTT Refs
+    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, autoSpeak, enableGrammarCheck, apiKey: settingsApiKey } = useSettingsStore();
+    const isPTTKeyDown = useRef(false);
+    const isPTTRedoKeyDown = useRef(false);
+    const initialInputRef = useRef('');
+    const latestTranscriptRef = useRef('');
+    const pttActiveRef = useRef(false); // Tracks if this STT session was started by PTT
+    const pttRedoActiveRef = useRef(false); // Tracks if this STT session is a redo
+    const isListeningRef = useRef(false);
+
     const currentSession = sessions.find(s => s.id === currentSessionId);
     const activePersona = personas.find(p => p.id === activePersonaId);
+
+    // --- Push-to-Talk Logic ---
+    // Ref for toggleListening (assigned after function definition below)
+    const toggleListeningRef = useRef<(() => void) | null>(null);
+
+    useEffect(() => {
+        if (!usePushToTalk) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.repeat) return;
+            const isRedoKey = e.code === (pushToTalkRedoKey || 'KeyR');
+            const isSendKey = e.code === (pushToTalkKey || 'Space');
+
+            if ((isSendKey || isRedoKey) && !isPTTKeyDown.current && !isPTTRedoKeyDown.current) {
+                stopSpeech(); // Stop TTS immediately when PTT starts
+                if (document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+                    e.preventDefault();
+                }
+                if (isRedoKey) {
+                    isPTTRedoKeyDown.current = true;
+                    pttRedoActiveRef.current = true; // Mark as redo session
+                } else {
+                    isPTTKeyDown.current = true;
+                }
+                if (!isListeningRef.current) {
+                    toggleListeningRef.current?.();
+                }
+            }
+        };
+
+        const handleKeyUp = (e: KeyboardEvent) => {
+            const isRedoKey = e.code === (pushToTalkRedoKey || 'KeyR');
+            const isSendKey = e.code === (pushToTalkKey || 'Space');
+
+            if (isSendKey && isPTTKeyDown.current) {
+                isPTTKeyDown.current = false;
+                if (isListeningRef.current) {
+                    toggleListeningRef.current?.();
+                }
+            }
+            if (isRedoKey && isPTTRedoKeyDown.current) {
+                isPTTRedoKeyDown.current = false;
+                if (isListeningRef.current) {
+                    toggleListeningRef.current?.();
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [usePushToTalk, pushToTalkKey, pushToTalkRedoKey]);
 
     // --- Tree Traversal & Thread Construction ---
     const thread: MessageNode[] = [];
@@ -100,8 +169,6 @@ export const ChatArea: React.FC = () => {
         }
     }
 
-
-
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
@@ -110,29 +177,21 @@ export const ChatArea: React.FC = () => {
         scrollToBottom();
     }, [currentSession?.currentLeafId, streamingContent]);
 
-    // --- Text-to-Speech (Browser Native) ---
+    // --- Text-to-Speech (Browser Native Only) ---
     const speakMessage = async (text: string, msgId: string) => {
-        // Stop any current speech
         stopSpeech();
         if (isSpeaking === msgId) {
             setIsSpeaking(null);
             return;
         }
 
-        if (!ttsVoice) {
-            alert("Please select a Voice in Settings first.");
-            return;
-        }
-
         setIsSpeaking(msgId);
         try {
-            await synthesizeSpeech(text, ttsVoice);
-            setIsSpeaking(null);
-        } catch (error: any) {
-            console.error("TTS Error", error);
-            alert(`TTS Error: ${error.message}`);
-            setIsSpeaking(null);
+            await synthesizeSpeech(text, ttsVoice || '');
+        } catch (e) {
+            console.error("TTS failed:", e);
         }
+        setIsSpeaking(null);
     };
 
     // --- File Handling ---
@@ -221,37 +280,190 @@ export const ChatArea: React.FC = () => {
         setAttachments(prev => prev.filter(a => a.id !== id));
     };
 
-    // --- Text-to-Speech (Browser Native) ---
-    const toggleListening = () => {
+    // --- Audio / STT ---
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+
+    const toggleListening = async () => {
+        const { useOfflineSTT, usePushToTalk } = useSettingsStore.getState();
+
         if (isListening) {
-            recognitionRef.current?.stop();
-            setIsListening(false);
+            setIsTranscribing(true); // Start processing UI
+            if (useOfflineSTT) {
+                // Stop Media Recorder
+                mediaRecorderRef.current?.stop();
+                setIsListening(false);
+                isListeningRef.current = false;
+                // Parsing happens in onstop
+            } else {
+                // Stop Browser Speech Recognition
+                recognitionRef.current?.stop();
+                setIsListening(false);
+                isListeningRef.current = false;
+                // Do NOT send here — send happens in recognition.onend
+                // This ensures the final transcript is available
+            }
             return;
         }
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            alert("Speech recognition not supported in this browser.");
-            return;
+        // START LISTENING
+        initialInputRef.current = input;
+
+        if (useOfflineSTT) {
+            // Offline Mode
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const mediaRecorder = new MediaRecorder(stream);
+                mediaRecorderRef.current = mediaRecorder;
+                audioChunksRef.current = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunksRef.current.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+                    try {
+                        const text = await localWhisperService.transcribe(audioBlob);
+                        if (text) {
+                            const newText = text.trim();
+                            const combinedText = initialInputRef.current + (initialInputRef.current ? ' ' : '') + newText;
+
+                            if (usePushToTalk) {
+                                if (pttRedoActiveRef.current) {
+                                    // Redo: edit last user message and regenerate
+                                    pttRedoActiveRef.current = false;
+                                    setInput('');
+                                    const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+                                    if (session) {
+                                        // Find last user message in thread
+                                        let lastUserMsgId: string | null = null;
+                                        let nodeId: string | null = session.currentLeafId;
+                                        while (nodeId) {
+                                            const node = session.messages[nodeId];
+                                            if (node?.role === 'user') { lastUserMsgId = node.id; break; }
+                                            nodeId = node?.parentId || null;
+                                        }
+                                        if (lastUserMsgId) {
+                                            useChatStore.getState().editMessage(currentSessionId!, lastUserMsgId, combinedText);
+                                            setTimeout(() => generateResponse(), 100);
+                                        }
+                                    }
+                                } else {
+                                    setInput(''); // Clear input before send
+                                    handleSend(combinedText);
+                                }
+                            } else {
+                                setInput(combinedText);
+                            }
+                        }
+                    } catch (error: any) {
+                        console.error("Whisper Transcription Error:", error);
+                        console.error("Offline Transcription Failed:", error);
+                    } finally {
+                        setIsTranscribing(false);
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                };
+
+                mediaRecorder.start();
+                setIsListening(true);
+                isListeningRef.current = true;
+            } catch (err: any) {
+                console.error("Microphone Access Error:", err);
+                setIsTranscribing(false);
+                alert(`Microphone Access Error: ${err.message} `);
+            }
+
+        } else {
+            // Online Mode
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                alert("Speech recognition not supported in this browser. Try enabling 'Offline Speech-to-Text' in Settings.");
+                return;
+            }
+
+            const recognition = new SpeechRecognition();
+            recognition.continuous = true; // Keep listening until we explicitly stop
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            // Track if this is a PTT session
+            pttActiveRef.current = usePushToTalk;
+
+            recognition.onresult = (event: any) => {
+                const currentResult = event.results[event.results.length - 1];
+                const transcript = currentResult[0].transcript;
+
+                const fullText = initialInputRef.current + (initialInputRef.current ? ' ' : '') + transcript;
+                latestTranscriptRef.current = fullText;
+                setInput(fullText);
+            };
+
+            recognition.onerror = (event: any) => {
+                if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    console.error("Speech Recognition Error:", event.error);
+                }
+                setIsListening(false);
+                isListeningRef.current = false;
+                setIsTranscribing(false);
+                pttActiveRef.current = false;
+                pttRedoActiveRef.current = false;
+            };
+
+            recognition.onend = () => {
+                setIsListening(false);
+                isListeningRef.current = false;
+                setIsTranscribing(false);
+
+                // If this was a PTT session, auto-send or redo
+                if (pttActiveRef.current || pttRedoActiveRef.current) {
+                    const isRedo = pttRedoActiveRef.current;
+                    pttActiveRef.current = false;
+                    pttRedoActiveRef.current = false;
+                    const textToSend = latestTranscriptRef.current;
+                    if (textToSend.trim()) {
+                        latestTranscriptRef.current = '';
+                        setInput(''); // Clear input box
+
+                        if (isRedo) {
+                            // Redo: edit last user message and regenerate
+                            setTimeout(() => {
+                                const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+                                if (session) {
+                                    let lastUserMsgId: string | null = null;
+                                    let nodeId: string | null = session.currentLeafId;
+                                    while (nodeId) {
+                                        const node = session.messages[nodeId];
+                                        if (node?.role === 'user') { lastUserMsgId = node.id; break; }
+                                        nodeId = node?.parentId || null;
+                                    }
+                                    if (lastUserMsgId) {
+                                        useChatStore.getState().editMessage(currentSessionId!, lastUserMsgId, textToSend);
+                                        setTimeout(() => generateResponse(), 100);
+                                    }
+                                }
+                            }, 100);
+                        } else {
+                            // Normal send
+                            setTimeout(() => {
+                                handleSend(textToSend);
+                            }, 100);
+                        }
+                    }
+                }
+            };
+
+            recognitionRef.current = recognition;
+            recognition.start();
+            setIsListening(true);
+            isListeningRef.current = true;
         }
-
-        const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = 'en-US';
-
-        recognition.onresult = (event: any) => {
-            const transcript = event.results[0][0].transcript;
-            setInput(prev => prev + (prev ? ' ' : '') + transcript);
-            setIsListening(false);
-        };
-
-        recognition.onend = () => setIsListening(false);
-
-        recognitionRef.current = recognition;
-        recognition.start();
-        setIsListening(true);
     };
+    // Keep ref in sync with latest toggleListening on every render
+    toggleListeningRef.current = toggleListening;
 
     // --- Sending Messages (Streaming) ---
     const handleStop = () => {
@@ -278,18 +490,36 @@ export const ChatArea: React.FC = () => {
         if (editingNodeId && contentOverride) {
             const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
             const editingNode = session?.messages[editingNodeId];
-            
+
             useChatStore.getState().editMessage(currentSessionId, editingNodeId, messageContent);
             setEditingNodeId(null);
             setEditContent('');
 
             // Only regenerate if we edited a USER message
             if (editingNode?.role === 'user') {
-                 await generateResponse();
+                await generateResponse();
+                // Trigger grammar check for the edited message
+                if (enableGrammarCheck && settingsApiKey) {
+                    checkGrammar(messageContent, settingsApiKey).then(correction => {
+                        if (correction && editingNodeId) {
+                            useChatStore.getState().setGrammarCorrection(currentSessionId, editingNodeId, correction);
+                        }
+                    });
+                }
             }
         } else {
-             // New Message
-            useChatStore.getState().addMessage(currentSessionId, 'user', messageContent, currentAttachments);
+            // New Message
+            const userMsgId = useChatStore.getState().addMessage(currentSessionId, 'user', messageContent, currentAttachments);
+
+            // Trigger grammar check in background (don't await)
+            if (enableGrammarCheck && settingsApiKey) {
+                checkGrammar(messageContent, settingsApiKey).then(correction => {
+                    if (correction) {
+                        useChatStore.getState().setGrammarCorrection(currentSessionId, userMsgId, correction);
+                    }
+                });
+            }
+
             await generateResponse();
         }
     };
@@ -304,16 +534,35 @@ export const ChatArea: React.FC = () => {
 
         // 1. Navigate to parent (User Message)
         useChatStore.setState(state => {
-             const sess = state.sessions.find(s => s.id === currentSessionId);
-             if (sess) {
-                  sess.currentLeafId = message.parentId; 
-                  return { ...state };
-             }
-             return state;
+            const sess = state.sessions.find(s => s.id === currentSessionId);
+            if (sess) {
+                // Remove the old model response from children of parent
+                if (message.parentId && sess.messages[message.parentId]) {
+                    // Logic to just clear current leaf? 
+                    // Simpler: Just regenerate from parent.
+                    // But wait, if user wants to regen a SPECIFIC model response? 
+                    // Actually, usually we regen the LAST response. 
+                    // If we are regenerating a helper message, we just branch from its parent.
+                }
+                sess.currentLeafId = message.parentId; // Point to User Message
+                return { ...state };
+            }
+            return state;
         });
 
-        // 2. Trigger Generation
         await generateResponse();
+
+        // Trigger grammar check for the parent user message (if it exists and doesn't have one)
+        if (enableGrammarCheck && settingsApiKey && message.parentId) {
+            const parentMsg = session.messages[message.parentId];
+            if (parentMsg && parentMsg.role === 'user' && !parentMsg.grammarCorrection) {
+                checkGrammar(parentMsg.content, settingsApiKey).then(correction => {
+                    if (correction) {
+                        useChatStore.getState().setGrammarCorrection(currentSessionId, message.parentId!, correction);
+                    }
+                });
+            }
+        }
     };
 
     // Helper to generate response from the current state of the session
@@ -337,17 +586,17 @@ export const ChatArea: React.FC = () => {
         }
 
         const apiHistory = [
-            { role: 'user', content: `System Instruction: ${activePersona.systemPrompt}` },
+            { role: 'user', content: `System Instruction: ${activePersona.systemPrompt} ` },
             ...thread.map(m => ({ role: m.role, content: m.content, attachments: m.attachments }))
         ];
 
         // 2. Create Placeholder for Model Response
         const modelNodeId = useChatStore.getState().addMessage(currentSessionId!, 'model', '...');
-        
+
         // 3. Stream Response
         setStreamingNodeId(modelNodeId);
         setStreamingContent('');
-        
+
         abortControllerRef.current = new AbortController();
 
         try {
@@ -366,18 +615,24 @@ export const ChatArea: React.FC = () => {
                     break;
                 }
 
+                // Accumulate chunk into text
                 currentAccruedText += chunk;
 
-                // Chat Mode Splitting Logic
+                // Update state immediately so user sees text appear
+                setStreamingNodeId(currentMsgId);
+                setStreamingContent(currentAccruedText);
+                useChatStore.getState().updateMessageContent(currentSessionId!, currentMsgId, currentAccruedText);
+
+                // Chat Mode: Split into separate message bubbles at sentence boundaries, with delay
                 if (activePersona.isChatMode) {
                     let searchStartIndex = 0;
                     while (true) {
                         const remainingText = currentAccruedText.slice(searchStartIndex);
                         const splitMatch = remainingText.match(/([.!?])\s+/);
-                        
-                        if (!splitMatch) break; 
 
-                        const relativeIndex = splitMatch.index!; 
+                        if (!splitMatch) break;
+
+                        const relativeIndex = splitMatch.index!;
                         const absoluteIndex = searchStartIndex + relativeIndex;
                         const puncIndex = absoluteIndex + 1;
 
@@ -388,28 +643,34 @@ export const ChatArea: React.FC = () => {
                         if (!isInsideCode) {
                             const firstPart = potentialFirstPart;
                             const remainder = currentAccruedText.slice(puncIndex).trimStart();
-                            
+
                             useChatStore.getState().updateMessageContent(currentSessionId!, currentMsgId, firstPart);
+
+                            // DELAY between sentences — this is the visible pause
+                            await new Promise(r => setTimeout(r, 600));
 
                             const newMsgId = useChatStore.getState().addMessage(currentSessionId!, 'model', '');
                             currentMsgId = newMsgId;
                             currentAccruedText = remainder;
-                            
+
+                            // Show remainder immediately in new bubble
+                            if (remainder) {
+                                setStreamingNodeId(currentMsgId);
+                                setStreamingContent(currentAccruedText);
+                                useChatStore.getState().updateMessageContent(currentSessionId!, currentMsgId, currentAccruedText);
+                            }
+
                             searchStartIndex = 0;
                         } else {
                             searchStartIndex = puncIndex;
                         }
                     }
                 }
-
-                setStreamingNodeId(currentMsgId);
-                setStreamingContent(currentAccruedText);
-                useChatStore.getState().updateMessageContent(currentSessionId!, currentMsgId, currentAccruedText);
             }
 
         } catch (e: any) {
-             if (e.name !== 'AbortError') {
-                 useChatStore.getState().addMessage(currentSessionId!, 'model', `**Error**: ${e.message || e}`);
+            if (e.name !== 'AbortError') {
+                useChatStore.getState().addMessage(currentSessionId!, 'model', `**Error**: ${e.message || e}`);
             }
         } finally {
             setIsLoading(false);
@@ -417,6 +678,17 @@ export const ChatArea: React.FC = () => {
             setStreamingNodeId(null);
             setStreamingContent('');
             abortControllerRef.current = null;
+
+            // Auto-speak: read AI response aloud if enabled
+            if (useSettingsStore.getState().autoSpeak) {
+                const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+                if (session && session.currentLeafId) {
+                    const lastMsg = session.messages[session.currentLeafId];
+                    if (lastMsg && lastMsg.role === 'model') {
+                        speakMessage(lastMsg.content, lastMsg.id);
+                    }
+                }
+            }
         }
     };
 
@@ -527,144 +799,158 @@ export const ChatArea: React.FC = () => {
 
                                         {/* Text Content */}
                                         {(msg.content || msg.role === 'model') && (
-                                            <div className={cn(
-                                                "rounded-2xl px-5 py-3 relative group/bubble text-left",
-                                                msg.role === 'user'
-                                                    ? (msg.content ? "bg-blue-600 text-white" : "hidden")
-                                                    : msg.content.startsWith('**Error**') ? "bg-red-900/20 border border-red-500/50 text-red-200" : "bg-gray-800 text-gray-100"
-                                            )}>
-                                                {/* Attachments (Inside bubble for Model - typically none, but consistent legacy behavior if needed, or we can split too. Keeping inside for now as user asked for User 'prompt' fix) */}
-                                                {msg.role === 'model' && msg.attachments && msg.attachments.length > 0 && (
-                                                    <div className="flex flex-wrap gap-2 mb-2">
-                                                        {msg.attachments.map(att => (
-                                                            <div key={att.id} className="relative group/att">
-                                                                {att.type === 'image' ? (
-                                                                    <img src={att.data} alt="attachment" className="w-32 h-32 object-cover rounded-lg" />
-                                                                ) : (
-                                                                    <div className="w-32 h-32 flex flex-col items-center justify-center bg-black/20 rounded-lg border border-white/10 p-2 text-center">
-                                                                        <FileText className="w-8 h-8 opacity-50 mb-1" />
-                                                                        <span className="text-xs truncate w-full">{att.name}</span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        ))}
+                                            <>
+                                                <div className={cn(
+                                                    "rounded-2xl px-5 py-3 relative group/bubble text-left",
+                                                    msg.role === 'user'
+                                                        ? (msg.content ? "bg-blue-600 text-white" : "hidden")
+                                                        : msg.content.startsWith('**Error**') ? "bg-red-900/20 border border-red-500/50 text-red-200" : "bg-gray-800 text-gray-100"
+                                                )}>
+                                                    {/* Attachments (Inside bubble for Model) */}
+                                                    {msg.role === 'model' && msg.attachments && msg.attachments.length > 0 && (
+                                                        <div className="flex flex-wrap gap-2 mb-2">
+                                                            {msg.attachments.map(att => (
+                                                                <div key={att.id} className="relative group/att">
+                                                                    {att.type === 'image' ? (
+                                                                        <img src={att.data} alt="attachment" className="w-32 h-32 object-cover rounded-lg" />
+                                                                    ) : (
+                                                                        <div className="w-32 h-32 flex flex-col items-center justify-center bg-black/20 rounded-lg border border-white/10 p-2 text-center">
+                                                                            <FileText className="w-8 h-8 opacity-50 mb-1" />
+                                                                            <span className="text-xs truncate w-full">{att.name}</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    {msg.content.startsWith('**Error**') && <AlertTriangle className="w-4 h-4 mb-2 text-red-400" />}
+                                                    <div className="prose prose-invert prose-sm max-w-none prose-chat">
+                                                        <ReactMarkdown
+                                                            remarkPlugins={[remarkGfm]}
+                                                            rehypePlugins={[rehypeHighlight]}
+                                                            components={{
+                                                                code({ node, className, children, ...props }: any) {
+                                                                    const isBlock = /language-/.test(className || '') ||
+                                                                        (typeof children === 'string' && children.includes('\n')) ||
+                                                                        (Array.isArray(children) && String(children.join('')).includes('\n'));
+
+                                                                    if (isBlock) {
+                                                                        return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
+                                                                    }
+
+                                                                    return (
+                                                                        <code className={cn("bg-white/10 rounded px-1.5 py-0.5 text-[0.875em]", className)} {...props}>
+                                                                            {children}
+                                                                        </code>
+                                                                    );
+                                                                },
+                                                                pre({ children }: any) {
+                                                                    return <>{children}</>;
+                                                                }
+                                                            }}
+                                                        >
+                                                            {(streamingNodeId === msg.id && streamingContent) ? streamingContent : msg.content}
+                                                        </ReactMarkdown>
+                                                    </div>
+                                                </div>
+
+                                                {/* Grammar Correction Display */}
+                                                {msg.role === 'user' && msg.grammarCorrection && (
+                                                    <div className="mt-2 text-left animate-in fade-in slide-in-from-top-2 duration-300">
+                                                        <div className="inline-block max-w-[90%] bg-yellow-900/10 border border-yellow-600/20 rounded-lg p-3 text-sm text-yellow-200/80 shadow-sm backdrop-blur-sm">
+                                                            <div
+                                                                className="prose prose-sm prose-invert prose-yellow leading-snug [&>b]:text-yellow-100/90"
+                                                                dangerouslySetInnerHTML={{ __html: msg.grammarCorrection }}
+                                                            />
+                                                        </div>
                                                     </div>
                                                 )}
-
-                                                {msg.content.startsWith('**Error**') && <AlertTriangle className="w-4 h-4 mb-2 text-red-400" />}
-                                                <div className="prose prose-invert prose-sm max-w-none prose-chat">
-                                                    <ReactMarkdown
-                                                        remarkPlugins={[remarkGfm]}
-                                                        rehypePlugins={[rehypeHighlight]}
-                                                        components={{
-                                                            code({ node, className, children, ...props }: any) {
-                                                                const isBlock = /language-/.test(className || '') ||
-                                                                    (typeof children === 'string' && children.includes('\n')) ||
-                                                                    (Array.isArray(children) && String(children.join('')).includes('\n'));
-
-                                                                if (isBlock) {
-                                                                    return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
-                                                                }
-
-                                                                return (
-                                                                    <code className={cn("bg-white/10 rounded px-1.5 py-0.5 text-[0.875em]", className)} {...props}>
-                                                                        {children}
-                                                                    </code>
-                                                                );
-                                                            },
-                                                            pre({ children }: any) {
-                                                                return <>{children}</>;
-                                                            }
-                                                        }}
-                                                    >
-                                                        {(streamingNodeId === msg.id && streamingContent) ? streamingContent : msg.content}
-                                                    </ReactMarkdown>
-                                                </div>
-                                            </div>
+                                            </>
                                         )}
+
+                                        {/* Message Controls */}
+                                        <div className={cn("flex items-center gap-2 -mt-1 select-none h-6", msg.role === 'user' ? "justify-end" : "justify-start")}>
+                                            {/* Navigation */}
+                                            {showNav && (
+                                                <div className="flex items-center text-xs font-medium text-gray-500">
+                                                    <button
+                                                        onClick={() => navigateBranch(currentSessionId, msg.id, 'prev')}
+                                                        disabled={currentSiblingIndex === 0}
+                                                        className="px-1 hover:text-gray-300 disabled:opacity-30 transition-colors"
+                                                    >
+                                                        &lt;
+                                                    </button>
+                                                    <span className="mx-0.5">{currentSiblingIndex + 1}/{totalSiblings}</span>
+                                                    <button
+                                                        onClick={() => navigateBranch(currentSessionId, msg.id, 'next')}
+                                                        disabled={currentSiblingIndex === totalSiblings - 1}
+                                                        className="px-1 hover:text-gray-300 disabled:opacity-30 transition-colors"
+                                                    >
+                                                        &gt;
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Actions */}
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                {msg.role === 'user' && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => navigator.clipboard.writeText(msg.content)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Copy"
+                                                        >
+                                                            <Copy className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => startEditing(msg)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Edit text"
+                                                        >
+                                                            <Edit2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {msg.role === 'model' && (
+                                                    <>
+                                                        <button
+                                                            onClick={() => navigator.clipboard.writeText(msg.content)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Copy"
+                                                        >
+                                                            <Copy className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleRegenerate(msg.id)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Retry"
+                                                        >
+                                                            <RotateCw className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => startEditing(msg)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Edit Response"
+                                                        >
+                                                            <Edit2 className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => speakMessage(msg.content, msg.id)}
+                                                            className={cn(
+                                                                "p-1 transition-colors",
+                                                                isSpeaking === msg.id ? "text-green-400 animate-pulse" : "text-gray-400 hover:text-white"
+                                                            )}
+                                                            title={isSpeaking === msg.id ? "Stop Speaking" : "Read Aloud"}
+                                                        >
+                                                            {isSpeaking === msg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Volume2 className="w-3.5 h-3.5" />}
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </div>
                                     </>
                                 )}
-
-                                {/* Message Controls (Nav + Edit/Speak) */}
-                                <div className={cn("flex items-center gap-2 -mt-1 select-none h-6", msg.role === 'user' ? "justify-end" : "justify-start")}>
-                                    {/* Navigation */}
-                                    {showNav && (
-                                        <div className="flex items-center text-xs font-medium text-gray-500">
-                                            <button
-                                                onClick={() => navigateBranch(currentSessionId, msg.id, 'prev')}
-                                                disabled={currentSiblingIndex === 0}
-                                                className="px-1 hover:text-gray-300 disabled:opacity-30 transition-colors"
-                                            >
-                                                &lt;
-                                            </button>
-                                            <span className="mx-0.5">{currentSiblingIndex + 1}/{totalSiblings}</span>
-                                            <button
-                                                onClick={() => navigateBranch(currentSessionId, msg.id, 'next')}
-                                                disabled={currentSiblingIndex === totalSiblings - 1}
-                                                className="px-1 hover:text-gray-300 disabled:opacity-30 transition-colors"
-                                            >
-                                                &gt;
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    {/* Actions */}
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        {msg.role === 'user' && (
-                                            <>
-                                                <button
-                                                    onClick={() => navigator.clipboard.writeText(msg.content)}
-                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
-                                                    title="Copy"
-                                                >
-                                                    <Copy className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => startEditing(msg)}
-                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
-                                                    title="Edit text"
-                                                >
-                                                    <Edit2 className="w-3.5 h-3.5" />
-                                                </button>
-                                            </>
-                                        )}
-                                        {msg.role === 'model' && (
-                                            <>
-                                                <button
-                                                    onClick={() => navigator.clipboard.writeText(msg.content)}
-                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
-                                                    title="Copy"
-                                                >
-                                                    <Copy className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleRegenerate(msg.id)}
-                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
-                                                    title="Retry"
-                                                >
-                                                    <RotateCw className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => startEditing(msg)}
-                                                    className="p-1 text-gray-400 hover:text-white transition-colors"
-                                                    title="Edit Response"
-                                                >
-                                                    <Edit2 className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={() => speakMessage(msg.content, msg.id)}
-                                                    className={cn(
-                                                        "p-1 transition-colors",
-                                                        isSpeaking === msg.id ? "text-green-400 animate-pulse" : "text-gray-400 hover:text-white"
-                                                    )}
-                                                    title={isSpeaking === msg.id ? "Stop Speaking" : "Read Aloud"}
-                                                >
-                                                    {isSpeaking === msg.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Volume2 className="w-3.5 h-3.5" />}
-                                                </button>
-                                            </>
-                                        )}
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     );
@@ -684,12 +970,14 @@ export const ChatArea: React.FC = () => {
             </div>
 
             {/* Drag & Drop Overlay */}
-            {isDragging && (
-                <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-sm z-50 flex flex-col items-center justify-center border-2 border-blue-500 border-dashed m-4 rounded-xl pointer-events-none">
-                    <Paperclip className="w-12 h-12 text-blue-400 mb-2" />
-                    <p className="text-lg font-semibold text-blue-100">Drop files here</p>
-                </div>
-            )}
+            {
+                isDragging && (
+                    <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-sm z-50 flex flex-col items-center justify-center border-2 border-blue-500 border-dashed m-4 rounded-xl pointer-events-none">
+                        <Paperclip className="w-12 h-12 text-blue-400 mb-2" />
+                        <p className="text-lg font-semibold text-blue-100">Drop files here</p>
+                    </div>
+                )
+            }
 
             {/* Input */}
             <div className="p-4 bg-gray-900 border-t border-gray-800">
@@ -718,6 +1006,13 @@ export const ChatArea: React.FC = () => {
                     )}
 
                     <div className="flex gap-2 items-end">
+                        {/* Transcribing Indicator inside Input Area */}
+                        {isTranscribing && (
+                            <div className="absolute -top-8 left-0 flex items-center gap-2 text-blue-400 bg-blue-500/10 px-3 py-1 rounded-full border border-blue-500/20 backdrop-blur-sm animate-pulse">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span className="text-xs font-medium">Transcribing Audio...</span>
+                            </div>
+                        )}
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             className="p-3 text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-xl transition-colors shrink-0"
@@ -782,7 +1077,6 @@ export const ChatArea: React.FC = () => {
                                 ))}
                             </select>
 
-                            {/* We could add more quick toggles here or a mini settings popover */}
                             <button
                                 onClick={toggleListening}
                                 className={cn(

@@ -16,6 +16,7 @@ export interface MessageNode {
     role: 'user' | 'model';
     content: string;
     attachments?: Attachment[];
+    grammarCorrection?: string; // HTML string with correction markup
     timestamp: number;
     parentId: string | null;
     childrenIds: string[];
@@ -41,6 +42,7 @@ export interface ChatState {
     addMessage: (sessionId: string, role: 'user' | 'model', content: string, attachments?: Attachment[]) => string;
     editMessage: (sessionId: string, originalMessageId: string, newContent: string) => void;
     updateMessageContent: (sessionId: string, messageId: string, newContent: string) => void; // In-place update for streaming
+    setGrammarCorrection: (sessionId: string, messageId: string, correction: string) => void;
     navigateBranch: (sessionId: string, nodeId: string, direction: 'prev' | 'next') => void;
     renameSession: (sessionId: string, newTitle: string) => void;
 
@@ -197,6 +199,28 @@ export const useChatStore = create<ChatState>()(
                     // In-place update (mutation of the specific node only)
                     // We do NOT create a new branch. This is for streaming.
                     const updatedNode = { ...node, content: newContent };
+                    const updatedMessages = { ...session.messages, [messageId]: updatedNode };
+
+                    const updatedSessions = [...state.sessions];
+                    updatedSessions[sessionIndex] = {
+                        ...session,
+                        messages: updatedMessages,
+                    };
+
+                    return { sessions: updatedSessions };
+                });
+            },
+
+            setGrammarCorrection: (sessionId, messageId, correction) => {
+                set((state) => {
+                    const sessionIndex = state.sessions.findIndex((s) => s.id === sessionId);
+                    if (sessionIndex === -1) return state;
+
+                    const session = state.sessions[sessionIndex];
+                    const node = session.messages[messageId];
+                    if (!node) return state;
+
+                    const updatedNode = { ...node, grammarCorrection: correction };
                     const updatedMessages = { ...session.messages, [messageId]: updatedNode };
 
                     const updatedSessions = [...state.sessions];

@@ -6,6 +6,18 @@ export interface SettingsState {
     ttsVoice: string;
     setApiKey: (key: string) => void;
     setTtsVoice: (voiceUri: string) => void;
+    useOfflineSTT: boolean;
+    setUseOfflineSTT: (value: boolean) => void;
+    autoSpeak: boolean;
+    setAutoSpeak: (value: boolean) => void;
+    usePushToTalk: boolean;
+    setUsePushToTalk: (value: boolean) => void;
+    enableGrammarCheck: boolean;
+    setEnableGrammarCheck: (value: boolean) => void;
+    pushToTalkKey: string;
+    setPushToTalkKey: (value: string) => void;
+    pushToTalkRedoKey: string;
+    setPushToTalkRedoKey: (value: string) => void;
     isSidebarCollapsed: boolean;
     toggleSidebar: () => void;
 }
@@ -13,11 +25,23 @@ export interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
     persist(
         (set) => ({
-            apiKey: 'AIzaSyAykXn8fJyMMZGeMGkDSuenbi7WM1jGxj0', // Default fake key
+            apiKey: '', // Start empty to force user entry
             ttsVoice: '',
             isSidebarCollapsed: false,
+            useOfflineSTT: false,
+            autoSpeak: false,
+            usePushToTalk: false,
+            pushToTalkKey: 'Space', // Default to Spacebar
+            pushToTalkRedoKey: 'KeyR', // Default to R key
             setApiKey: (apiKey) => set({ apiKey }),
             setTtsVoice: (ttsVoice) => set({ ttsVoice }),
+            setUseOfflineSTT: (useOfflineSTT) => set({ useOfflineSTT }),
+            setAutoSpeak: (autoSpeak) => set({ autoSpeak }),
+            enableGrammarCheck: false,
+            setEnableGrammarCheck: (enableGrammarCheck) => set({ enableGrammarCheck }),
+            setUsePushToTalk: (usePushToTalk) => set({ usePushToTalk }),
+            setPushToTalkKey: (pushToTalkKey) => set({ pushToTalkKey }),
+            setPushToTalkRedoKey: (pushToTalkRedoKey) => set({ pushToTalkRedoKey }),
             toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
         }),
         {
