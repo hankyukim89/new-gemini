@@ -241,9 +241,9 @@ export const getBrowserVoices = (): SpeechSynthesisVoice[] => {
 
 export const checkGrammar = async (
     text: string,
-    apiKey: string
+    apiKey: string,
+    context: { role: string; content: string }[] = []
 ): Promise<string | null> => {
-    // console.log("checkGrammar called for text length:", text.length);
     if (!text || text.trim().length < 2) return null;
 
     try {
@@ -251,21 +251,27 @@ export const checkGrammar = async (
         // Use a fast, lightweight model for background checks
         const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
 
+        // Build context string from last 5 messages to save tokens but provide context
+        const contextStr = context.slice(-5).map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content}`).join('\n');
+
         const prompt = `
         You are a helpful grammar assistant.
-        Check the following text for grammar, spelling, and word choice errors.
+        Check the following text for grammar, spelling, and word choice errors, taking into account the conversation context.
+        
+        Context (Previous Conversation):
+        ${contextStr}
+
+        Target Text to Check: "${text}"
         
         Rules:
-        1. If the text is natural and grammatically correct, return ONLY the string: NO_ERRORS
+        1. If the text is natural and grammatically correct given the context, return ONLY the string: NO_ERRORS
         2. If there are mistakes, provide specific HTML output:
            - <b>Corrected:</b> [The corrected sentence]
            - <br>
            - <i>[Optional 1-sentence explanation if needed]</i>
         
-        Do not use markdown blocks. Do not use <ul> or <li> unless absolutely necessary for multiple unrelated errors.
+        Do not use markdown blocks. Do not use <ul> or <li> unless absolutely necessary.
         Keep it simple and direct.
-
-        Text to check: "${text}"
         `;
 
         const result = await model.generateContent(prompt);
@@ -282,6 +288,68 @@ export const checkGrammar = async (
         return correction;
     } catch (error) {
         console.error("Grammar Check Error:", error);
+        return null;
+    }
+};
+
+export const translateText = async (
+    text: string,
+    targetLanguage: string,
+    apiKey: string
+): Promise<string | null> => {
+    if (!text || !targetLanguage) return null;
+
+    try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+
+        const prompt = `
+        Translate the following text into ${targetLanguage}.
+        Return ONLY the translation, nothing else. No preamble.
+
+        Text: "${text}"
+        `;
+
+        const result = await model.generateContent(prompt);
+        return result.response.text().trim();
+    } catch (error: any) {
+        console.error("Translation Error:", error);
+        return null; // Return null on error
+    }
+};
+
+export const defineWord = async (
+    word: string,
+    context: string,
+    targetLanguage: string,
+    apiKey: string
+): Promise<string | null> => {
+    if (!word || !targetLanguage) return null;
+
+    try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
+
+        const prompt = `
+        You are a dictionary assistant.
+        Provide a concise definition and translation for the word "${word}" in ${targetLanguage}.
+        
+        Context sentence: "${context}"
+
+        Format:
+        <b>[Word]</b> ([Translation])
+        <br>
+        <i>[Definition in ${targetLanguage}]</i>
+        
+        Keep it very brief (max 2 sentences). Return HTML. No markdown blocks.
+        `;
+
+        const result = await model.generateContent(prompt);
+        let definition = result.response.text().trim();
+        definition = definition.replace(/^```html/, '').replace(/```$/, '').trim();
+        return definition;
+    } catch (error: any) {
+        console.error("Definition Error:", error);
         return null;
     }
 };

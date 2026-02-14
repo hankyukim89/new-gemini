@@ -18,7 +18,9 @@ export const GlobalSettingsModal: React.FC<GlobalSettingsModalProps> = ({ onClos
         enableGrammarCheck, setEnableGrammarCheck,
         usePushToTalk, setUsePushToTalk,
         pushToTalkKey, setPushToTalkKey,
-        pushToTalkRedoKey, setPushToTalkRedoKey
+        pushToTalkRedoKey, setPushToTalkRedoKey,
+        enableTranslation, setEnableTranslation,
+        targetLanguage, setTargetLanguage
     } = useSettingsStore();
 
     const [browserVoices, setBrowserVoices] = React.useState<SpeechSynthesisVoice[]>([]);
@@ -172,6 +174,50 @@ export const GlobalSettingsModal: React.FC<GlobalSettingsModalProps> = ({ onClos
                                 className={`${enableGrammarCheck ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
                             />
                         </button>
+                    </div>
+
+                    {/* Translation Settings */}
+                    <div className="space-y-4 pt-4 border-t border-gray-800">
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                                <label className="text-sm font-medium text-gray-400">Click-to-Translate</label>
+                                <p className="text-xs text-gray-500">Click words for definitions & translate messages</p>
+                            </div>
+                            <button
+                                onClick={() => setEnableTranslation(!enableTranslation)}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900 ${enableTranslation ? 'bg-blue-600' : 'bg-gray-700'}`}
+                            >
+                                <span
+                                    className={`${enableTranslation ? 'translate-x-6' : 'translate-x-1'} inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                                />
+                            </button>
+                        </div>
+
+                        {enableTranslation && (
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium text-gray-400 flex items-center gap-2">
+                                    Target Language
+                                </label>
+                                <select
+                                    value={targetLanguage}
+                                    onChange={(e) => setTargetLanguage(e.target.value)}
+                                    className="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
+                                >
+                                    <option value="Spanish">Spanish</option>
+                                    <option value="French">French</option>
+                                    <option value="German">German</option>
+                                    <option value="Italian">Italian</option>
+                                    <option value="Portuguese">Portuguese</option>
+                                    <option value="Russian">Russian</option>
+                                    <option value="Japanese">Japanese</option>
+                                    <option value="Korean">Korean</option>
+                                    <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+                                    <option value="Hindi">Hindi</option>
+                                    <option value="Arabic">Arabic</option>
+                                    <option value="English">English</option>
+                                </select>
+                            </div>
+                        )}
                     </div>
 
                     {/* Push to Talk Section */}

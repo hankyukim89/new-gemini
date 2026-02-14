@@ -2,6 +2,7 @@ import React from 'react';
 import { useChatStore } from '../store/useChatStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { Plus, MessageSquare, Trash2, ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { stopSpeech } from '../services/geminiService';
 import { cn } from '../lib/utils';
 
 export const Sidebar: React.FC = () => {
@@ -11,6 +12,7 @@ export const Sidebar: React.FC = () => {
     const [editTitle, setEditTitle] = React.useState('');
 
     const handleNewChat = () => {
+        stopSpeech();
         const newId = addSession();
         selectSession(newId);
     };
@@ -86,7 +88,10 @@ export const Sidebar: React.FC = () => {
                     {sessions.map((session) => (
                         <div
                             key={session.id}
-                            onClick={() => selectSession(session.id)}
+                            onClick={() => {
+                                stopSpeech();
+                                selectSession(session.id);
+                            }}
                             className={cn(
                                 "group relative flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all border border-transparent",
                                 currentSessionId === session.id

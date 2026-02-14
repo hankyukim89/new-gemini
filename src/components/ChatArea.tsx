@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore, type MessageNode, type Attachment } from '../store/useChatStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePersonaStore } from '../store/usePersonaStore';
-import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS, checkGrammar } from '../services/geminiService';
+import { sendMessageStream, MODEL_LIMITS, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS, checkGrammar, translateText, defineWord } from '../services/geminiService';
 import { localWhisperService } from '../services/localWhisperService';
-import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings, RotateCw, BookOpen } from 'lucide-react';
+import { Send, User as UserIcon, Bot, AlertTriangle, Cpu, ChevronLeft, ChevronRight, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, Image as ImageIcon, FileText, Plus, Settings, RotateCw, BookOpen, Globe } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -63,7 +63,7 @@ const CodeBlock = ({ className, children, ...props }: any) => {
 };
 
 export const ChatArea: React.FC = () => {
-    const { currentSessionId, sessions, addMessage, addSession, navigateBranch } = useChatStore();
+    const { currentSessionId, sessions, addMessage, addSession, navigateBranch, setTranslation } = useChatStore();
     const { apiKey, ttsVoice } = useSettingsStore();
     const { personas, activePersonaId } = usePersonaStore();
 
@@ -81,12 +81,16 @@ export const ChatArea: React.FC = () => {
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    // Translation / Definition State
+    const [definitionHover, setDefinitionHover] = useState<{ x: number, y: number, html: string } | null>(null);
+    const [isLoadingDefinition, setIsLoadingDefinition] = useState(false);
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
     // PTT Refs
-    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, autoSpeak, enableGrammarCheck, apiKey: settingsApiKey } = useSettingsStore();
+    const { usePushToTalk, pushToTalkKey, pushToTalkRedoKey, autoSpeak, enableGrammarCheck, apiKey: settingsApiKey, enableTranslation, targetLanguage } = useSettingsStore();
     const isPTTKeyDown = useRef(false);
     const isPTTRedoKeyDown = useRef(false);
     const initialInputRef = useRef('');
@@ -97,6 +101,94 @@ export const ChatArea: React.FC = () => {
 
     const currentSession = sessions.find(s => s.id === currentSessionId);
     const activePersona = personas.find(p => p.id === activePersonaId);
+
+    // --- Context Helper ---
+    const getContextForMessage = (messageId: string) => {
+        const session = useChatStore.getState().sessions.find(s => s.id === currentSessionId);
+        if (!session) return [];
+        const message = session.messages[messageId];
+        if (!message || !message.parentId) return [];
+
+        const contextMessages: { role: string; content: string }[] = [];
+        let curr: string | null = message.parentId;
+        while (curr) {
+            const n = session.messages[curr];
+            if (n) {
+                contextMessages.unshift({ role: n.role, content: n.content });
+                curr = n.parentId;
+            } else break;
+        }
+        return contextMessages;
+    };
+
+    // --- Translation & Definition ---
+    const handleBubbleClick = (content: string, e: React.MouseEvent) => {
+        if (!enableTranslation || !settingsApiKey) return;
+
+        // Prevent filtering: don't trigger on buttons/links/code blocks
+        if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) return;
+        if ((e.target as HTMLElement).tagName === 'CODE' || (e.target as HTMLElement).closest('code')) return;
+        if ((e.target as HTMLElement).tagName === 'PRE' || (e.target as HTMLElement).closest('pre')) return;
+
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) return; // Allow user to select text freely
+
+        // Only trigger if clicking on text
+        // Use caretRangeFromPoint to get the clicked word
+        // Note: caretRangeFromPoint is non-standard in valid TS but available in most browsers. 
+        // We cast document to any or check existence.
+
+        const doc = document as any;
+        if (doc.caretRangeFromPoint || doc.caretPositionFromPoint) {
+            let range;
+            if (doc.caretRangeFromPoint) {
+                range = doc.caretRangeFromPoint(e.clientX, e.clientY);
+            } else if (doc.caretPositionFromPoint) {
+                const pos = doc.caretPositionFromPoint(e.clientX, e.clientY);
+                range = document.createRange();
+                range.setStart(pos.offsetNode, pos.offset);
+                range.collapse(true);
+            }
+
+            if (range && range.startContainer.nodeType === Node.TEXT_NODE) {
+                // We have a position. Now expand to word.
+                // We use selection modification which is effective.
+                if (selection) {
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    selection.modify('move', 'backward', 'word');
+                    selection.modify('extend', 'forward', 'word');
+
+                    const word = selection.toString().trim();
+
+                    // Filter out punctuation-only or empty
+                    if (word && word.match(/[a-zA-Z0-9\u00C0-\u00FF\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF\uAC00-\uD7AF]/)) {
+                        setDefinitionHover({ x: e.clientX, y: e.clientY + 15, html: '<div class="animate-pulse text-xs">Loading...</div>' });
+
+                        // Context: rough approximation around the word
+                        const context = content;
+
+                        defineWord(word, context, targetLanguage, settingsApiKey).then(def => {
+                            if (def) {
+                                setDefinitionHover({ x: e.clientX, y: e.clientY + 15, html: def });
+                            } else {
+                                setDefinitionHover(null);
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    };
+
+    const handleTranslateMessage = async (messageId: string, content: string) => {
+        if (!settingsApiKey || !enableTranslation) return;
+
+        const translation = await translateText(content, targetLanguage, settingsApiKey);
+        if (translation) {
+            setTranslation(currentSessionId!, messageId, translation);
+        }
+    };
 
     // --- Push-to-Talk Logic ---
     // Ref for toggleListening (assigned after function definition below)
@@ -347,7 +439,18 @@ export const ChatArea: React.FC = () => {
                                             nodeId = node?.parentId || null;
                                         }
                                         if (lastUserMsgId) {
+                                            const { enableGrammarCheck, apiKey } = useSettingsStore.getState();
                                             useChatStore.getState().editMessage(currentSessionId!, lastUserMsgId, combinedText);
+
+                                            if (enableGrammarCheck && apiKey) {
+                                                const context = getContextForMessage(lastUserMsgId!);
+                                                checkGrammar(combinedText, apiKey, context).then(correction => {
+                                                    if (correction) {
+                                                        useChatStore.getState().setGrammarCorrection(currentSessionId!, lastUserMsgId!, correction);
+                                                    }
+                                                });
+                                            }
+
                                             setTimeout(() => generateResponse(), 100);
                                         }
                                     }
@@ -442,6 +545,17 @@ export const ChatArea: React.FC = () => {
                                     }
                                     if (lastUserMsgId) {
                                         useChatStore.getState().editMessage(currentSessionId!, lastUserMsgId, textToSend);
+
+                                        const { enableGrammarCheck, apiKey } = useSettingsStore.getState();
+                                        if (enableGrammarCheck && apiKey) {
+                                            const context = getContextForMessage(lastUserMsgId!);
+                                            checkGrammar(textToSend, apiKey, context).then(correction => {
+                                                if (correction) {
+                                                    useChatStore.getState().setGrammarCorrection(currentSessionId!, lastUserMsgId!, correction);
+                                                }
+                                            });
+                                        }
+
                                         setTimeout(() => generateResponse(), 100);
                                     }
                                 }
@@ -500,7 +614,8 @@ export const ChatArea: React.FC = () => {
                 await generateResponse();
                 // Trigger grammar check for the edited message
                 if (enableGrammarCheck && settingsApiKey) {
-                    checkGrammar(messageContent, settingsApiKey).then(correction => {
+                    const context = getContextForMessage(editingNodeId!);
+                    checkGrammar(messageContent, settingsApiKey, context).then(correction => {
                         if (correction && editingNodeId) {
                             useChatStore.getState().setGrammarCorrection(currentSessionId, editingNodeId, correction);
                         }
@@ -513,7 +628,8 @@ export const ChatArea: React.FC = () => {
 
             // Trigger grammar check in background (don't await)
             if (enableGrammarCheck && settingsApiKey) {
-                checkGrammar(messageContent, settingsApiKey).then(correction => {
+                const context = getContextForMessage(userMsgId);
+                checkGrammar(messageContent, settingsApiKey, context).then(correction => {
                     if (correction) {
                         useChatStore.getState().setGrammarCorrection(currentSessionId, userMsgId, correction);
                     }
@@ -556,7 +672,8 @@ export const ChatArea: React.FC = () => {
         if (enableGrammarCheck && settingsApiKey && message.parentId) {
             const parentMsg = session.messages[message.parentId];
             if (parentMsg && parentMsg.role === 'user' && !parentMsg.grammarCorrection) {
-                checkGrammar(parentMsg.content, settingsApiKey).then(correction => {
+                const context = getContextForMessage(message.parentId!);
+                checkGrammar(parentMsg.content, settingsApiKey, context).then(correction => {
                     if (correction) {
                         useChatStore.getState().setGrammarCorrection(currentSessionId, message.parentId!, correction);
                     }
@@ -800,12 +917,14 @@ export const ChatArea: React.FC = () => {
                                         {/* Text Content */}
                                         {(msg.content || msg.role === 'model') && (
                                             <>
-                                                <div className={cn(
-                                                    "rounded-2xl px-5 py-3 relative group/bubble text-left",
-                                                    msg.role === 'user'
-                                                        ? (msg.content ? "bg-blue-600 text-white" : "hidden")
-                                                        : msg.content.startsWith('**Error**') ? "bg-red-900/20 border border-red-500/50 text-red-200" : "bg-gray-800 text-gray-100"
-                                                )}>
+                                                <div
+                                                    onClick={(e) => handleBubbleClick(msg.content, e)}
+                                                    className={cn(
+                                                        "rounded-2xl px-5 py-3 relative group/bubble text-left cursor-text",
+                                                        msg.role === 'user'
+                                                            ? (msg.content ? "bg-blue-600 text-white" : "hidden")
+                                                            : msg.content.startsWith('**Error**') ? "bg-red-900/20 border border-red-500/50 text-red-200" : "bg-gray-800 text-gray-100"
+                                                    )}>
                                                     {/* Attachments (Inside bubble for Model) */}
                                                     {msg.role === 'model' && msg.attachments && msg.attachments.length > 0 && (
                                                         <div className="flex flex-wrap gap-2 mb-2">
@@ -866,6 +985,21 @@ export const ChatArea: React.FC = () => {
                                                         </div>
                                                     </div>
                                                 )}
+
+                                                {/* Translation Display */}
+                                                {msg.translation && (
+                                                    <div className="mt-2 text-left animate-in fade-in slide-in-from-top-2 duration-300">
+                                                        <div className="inline-block max-w-[90%] bg-indigo-900/20 border border-indigo-500/30 rounded-lg p-3 text-sm text-indigo-100 shadow-sm backdrop-blur-sm">
+                                                            <div className="flex items-center gap-2 mb-1 text-indigo-400 text-xs font-bold uppercase tracking-wider">
+                                                                <Globe className="w-3 h-3" />
+                                                                <span>Translation ({targetLanguage})</span>
+                                                            </div>
+                                                            <div className="prose prose-sm prose-invert prose-indigo leading-relaxed">
+                                                                {msg.translation}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </>
                                         )}
 
@@ -897,6 +1031,13 @@ export const ChatArea: React.FC = () => {
                                                 {msg.role === 'user' && (
                                                     <>
                                                         <button
+                                                            onClick={() => handleTranslateMessage(msg.id, msg.content)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Translate"
+                                                        >
+                                                            <Globe className="w-3.5 h-3.5" />
+                                                        </button>
+                                                        <button
                                                             onClick={() => navigator.clipboard.writeText(msg.content)}
                                                             className="p-1 text-gray-400 hover:text-white transition-colors"
                                                             title="Copy"
@@ -914,6 +1055,13 @@ export const ChatArea: React.FC = () => {
                                                 )}
                                                 {msg.role === 'model' && (
                                                     <>
+                                                        <button
+                                                            onClick={() => handleTranslateMessage(msg.id, msg.content)}
+                                                            className="p-1 text-gray-400 hover:text-white transition-colors"
+                                                            title="Translate"
+                                                        >
+                                                            <Globe className="w-3.5 h-3.5" />
+                                                        </button>
                                                         <button
                                                             onClick={() => navigator.clipboard.writeText(msg.content)}
                                                             className="p-1 text-gray-400 hover:text-white transition-colors"
@@ -968,6 +1116,22 @@ export const ChatArea: React.FC = () => {
                 )}
                 <div ref={messagesEndRef} />
             </div>
+
+            {/* Definition Popover */}
+            {definitionHover && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        left: Math.min(definitionHover.x, window.innerWidth - 270),
+                        top: definitionHover.y,
+                        maxWidth: '260px'
+                    }}
+                    className="z-50 bg-gray-900/95 backdrop-blur border border-gray-700 rounded-lg shadow-xl p-3 text-sm text-gray-200 animate-in fade-in zoom-in-95 duration-100 pointer-events-auto select-none"
+                    onClick={() => setDefinitionHover(null)}
+                >
+                    <div dangerouslySetInnerHTML={{ __html: definitionHover.html }} />
+                </div>
+            )}
 
             {/* Drag & Drop Overlay */}
             {
