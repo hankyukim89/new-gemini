@@ -33,6 +33,11 @@ declare global {
 }
 
 
+// ============================================================================
+// CHAT AREA COMPONENT
+// Main component handling chat interface, messages, input, and interactions
+// ============================================================================
+
 export const ChatArea: React.FC = () => {
     const { currentSessionId, sessions, addSession, navigateBranch, setTranslation } = useChatStore();
     const { apiKey, ttsVoice } = useSettingsStore();
@@ -73,6 +78,9 @@ export const ChatArea: React.FC = () => {
     const toggleListeningRef = useRef<(() => void) | null>(null);
     const isListeningRef = useRef(false);
 
+    // ========================================
+    // DERIVED STATE
+    // ========================================
     const currentSession = sessions.find(s => s.id === currentSessionId);
     const activePersona = personas.find(p => p.id === activePersonaId);
 
