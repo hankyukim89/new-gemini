@@ -10,6 +10,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { cn } from '../lib/utils';
+import { CodeBlock } from './CodeBlock';
+
+
 
 // --- Speech Types ---
 interface SpeechRecognition extends EventTarget {
@@ -29,39 +32,6 @@ declare global {
     }
 }
 
-// --- Code Block with Copy Button ---
-const CodeBlock = ({ className, children, ...props }: any) => {
-    const [copied, setCopied] = useState(false);
-    const match = /language-(\w+)/.exec(className || '');
-    const language = match ? match[1] : '';
-    const codeString = String(children).replace(/\n$/, '');
-
-    const handleCopy = useCallback(async () => {
-        await navigator.clipboard.writeText(codeString);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    }, [codeString]);
-
-    return (
-        <div className="not-prose my-3">
-            <div className="code-block-header">
-                <span>{language || 'code'}</span>
-                <button onClick={handleCopy}>
-                    {copied ? (
-                        <><Check className="w-3 h-3" /> Copied!</>
-                    ) : (
-                        <><Copy className="w-3 h-3" /> Copy code</>
-                    )}
-                </button>
-            </div>
-            <pre className="!mt-0 !rounded-t-none">
-                <code className={className} {...props}>
-                    {children}
-                </code>
-            </pre>
-        </div>
-    );
-};
 
 export const ChatArea: React.FC = () => {
     const { currentSessionId, sessions, addSession, navigateBranch, setTranslation } = useChatStore();
