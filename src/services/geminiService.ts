@@ -104,6 +104,16 @@ export const sendMessageToGemini = async (
 
     } catch (error: any) {
         console.warn("API Call Failed:", error);
+
+        // Check if error is due to safety filtering
+        const errorMsg = error.message || error.toString();
+        if (errorMsg.includes('SAFETY') ||
+            errorMsg.includes('blocked') ||
+            errorMsg.includes('HARM_CATEGORY') ||
+            errorMsg.includes('BLOCK_REASON')) {
+            throw new Error('⚠️ Content blocked by Google\'s safety filters. Try rephrasing your message or adjusting safety settings (note: Google enforces server-side filtering that cannot be fully disabled).');
+        }
+
         throw new Error(error.message || "Unknown API Error");
     }
 };
@@ -186,6 +196,16 @@ export const sendMessageStream = async function* (
 
     } catch (error: any) {
         console.warn("Stream API Call Failed:", error);
+
+        // Check if error is due to safety filtering
+        const errorMsg = error.message || error.toString();
+        if (errorMsg.includes('SAFETY') ||
+            errorMsg.includes('blocked') ||
+            errorMsg.includes('HARM_CATEGORY') ||
+            errorMsg.includes('BLOCK_REASON')) {
+            throw new Error('⚠️ Content blocked by Google\'s safety filters. Try rephrasing your message or adjusting safety settings (note: Google enforces server-side filtering that cannot be fully disabled).');
+        }
+
         throw new Error(error.message || "Unknown Stream Error");
     }
 };

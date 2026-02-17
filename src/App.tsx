@@ -15,10 +15,11 @@ export default function App() {
 
   // Initialize a session if none exist
   useEffect(() => {
-    if (sessions.length === 0) {
+    // Check inside the effect to avoid dependency loop issues if addSession changes state immediately
+    if (useChatStore.getState().sessions.length === 0) {
       addSession();
     }
-  }, [sessions.length, addSession]);
+  }, [addSession]);
 
   // Model Migration Logic: Ensure active persona uses a valid model
   const { personas, activePersonaId, updatePersona } = usePersonaStore();

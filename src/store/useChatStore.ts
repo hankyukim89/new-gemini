@@ -312,10 +312,20 @@ export const useChatStore = create<ChatState>()(
             },
 
             deleteSession: (id) =>
-                set((state) => ({
-                    sessions: state.sessions.filter((s) => s.id !== id),
-                    currentSessionId: state.currentSessionId === id ? null : state.currentSessionId,
-                })),
+                set((state) => {
+                    const remainingSessions = state.sessions.filter((s) => s.id !== id);
+                    let newCurrentSessionId = state.currentSessionId;
+
+                    // If we're deleting the current session, select another one
+                    if (state.currentSessionId === id) {
+                        newCurrentSessionId = remainingSessions.length > 0 ? remainingSessions[0].id : null;
+                    }
+
+                    return {
+                        sessions: remainingSessions,
+                        currentSessionId: newCurrentSessionId,
+                    };
+                }),
             clearSessions: () => set({ sessions: [], currentSessionId: null }),
         }),
         {

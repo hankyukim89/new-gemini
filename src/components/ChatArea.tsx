@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useChatStore, type MessageNode, type Attachment } from '../store/useChatStore';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { usePersonaStore } from '../store/usePersonaStore';
+// import { useAuthStore } from '../store/useAuthStore';
 import { sendMessageStream, synthesizeSpeech, stopSpeech, PLAYGROUND_MODELS, checkGrammar, translateText, defineWord } from '../services/geminiService';
 import { localWhisperService } from '../services/localWhisperService';
 import { Send, User as UserIcon, Bot, AlertTriangle, Edit2, Mic, Volume2, Loader2, Square, Copy, Check, Paperclip, X, FileText, Plus, RotateCw, Globe } from 'lucide-react';
@@ -219,13 +220,23 @@ export const ChatArea: React.FC = () => {
                 oscillator.start();
                 oscillator.stop(context.currentTime + 0.1);
 
-                setTimeout(() => {
-                    if (context.state !== 'closed') context.close();
-                }, 500);
+                // Clean up after sound completes
+                oscillator.onended = () => {
+                    try {
+                        oscillator.disconnect();
+                        gain.disconnect();
+                        if (context.state !== 'closed') {
+                            context.close().catch(() => {/* ignore close errors */ });
+                        }
+                    } catch (e) {
+                        // Ignore cleanup errors
+                    }
+                };
             } catch (e) {
                 // Silently fail if audio context is blocked
             }
         };
+
 
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.repeat) return;
@@ -289,6 +300,43 @@ export const ChatArea: React.FC = () => {
             window.removeEventListener('keyup', handleKeyUp);
         };
     }, [usePushToTalk, pushToTalkKey, pushToTalkRedoKey, pushToTalkTranslateKey, enableTranslation]);
+
+    // --- Auto-Focus Input (ChatGPT-style) ---
+    useEffect(() => {
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            // Only handle printable characters
+            if (e.key.length !== 1) return;
+
+            // Don't interfere with modifier key combinations (Cmd+K, Ctrl+F, etc.)
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+            // Check if we're already in an input/textarea
+            const activeElement = document.activeElement;
+            if (activeElement?.tagName === 'INPUT' ||
+                activeElement?.tagName === 'TEXTAREA' ||
+                activeElement?.getAttribute('contenteditable') === 'true') {
+                return;
+            }
+
+            // Check if any modal is open by looking for common modal indicators
+            // This checks for backdrop elements or modal containers
+            const hasOpenModal = document.querySelector('[role="dialog"]') ||
+                document.querySelector('.modal-backdrop') ||
+                editingNodeId !== null; // Don't interfere when editing messages
+
+            if (hasOpenModal) return;
+
+            // Focus the input and let the character through
+            if (inputRef.current && !isLoading) {
+                inputRef.current.focus();
+                // The character will be naturally inserted by the browser
+            }
+        };
+
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, [isLoading, editingNodeId]);
+
 
     // --- Tree Traversal & Thread Construction ---
     const thread: MessageNode[] = [];
@@ -669,6 +717,13 @@ export const ChatArea: React.FC = () => {
     };
 
     const handleSend = async (contentOverride?: string, originalText?: string) => {
+        // Authentication Check
+        /* const { user, openLoginModal } = useAuthStore.getState();
+        if (!user) {
+            openLoginModal();
+            return;
+        } */
+
         const messageContent = contentOverride || input;
         const currentAttachments = contentOverride ? [] : attachments; // Only use attachments for new messages
 
@@ -866,7 +921,20 @@ export const ChatArea: React.FC = () => {
 
         } catch (e: any) {
             if (e.name !== 'AbortError') {
-                useChatStore.getState().addMessage(currentSessionId!, 'model', `**Error**: ${e.message || e}`);
+                const errorMessage = e.message || e.toString();
+                if (errorMessage.includes('403') || errorMessage.includes('Method doesn\'t allow unregistered callers')) {
+                    useChatStore.getState().addMessage(currentSessionId!, 'model', `**Authentication Required**
+
+It looks like you haven't set up your API Key yet.
+
+To get started:
+1. Go to [Google AI Studio](https://aistudio.google.com/app/api-keys).
+2. Click on "Create API key".
+3. Copy the key.
+4. Paste it into the Settings (gear icon) in this app.`);
+                } else {
+                    useChatStore.getState().addMessage(currentSessionId!, 'model', `**Error**: ${errorMessage}`);
+                }
             }
         } finally {
             setIsLoading(false);

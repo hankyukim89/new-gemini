@@ -146,7 +146,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" role="dialog" aria-modal="true">
             <div className="bg-[#0f111a] w-full h-full md:w-[95vw] md:h-[90vh] md:rounded-2xl shadow-2xl flex overflow-hidden border border-gray-800">
 
                 {/* Left Sidebar: Persona List */}
@@ -481,6 +481,17 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                                     <h5 className="text-base font-semibold text-white">Run Safety Settings</h5>
                                                 </div>
                                                 <p className="text-sm text-gray-400 -mt-2">Adjust content filtering thresholds.</p>
+
+                                                {/* Warning Banner */}
+                                                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex gap-3">
+                                                    <div className="text-yellow-500 mt-0.5">⚠️</div>
+                                                    <div className="flex-1">
+                                                        <p className="text-xs text-yellow-200/90 leading-relaxed">
+                                                            <strong>Note:</strong> Google enforces server-side content filtering that cannot be fully disabled.
+                                                            Even with all settings set to "None", certain harmful content may still be blocked by Google's API.
+                                                        </p>
+                                                    </div>
+                                                </div>
 
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                                                     {HARM_CATEGORIES.map(category => (

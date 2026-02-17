@@ -144,18 +144,6 @@ export const Sidebar: React.FC = () => {
                         </div>
                     )}
                 </div>
-                {/* Footer / User Profile Placeholder */}
-                <div className="p-4 border-t border-gray-800">
-                    <div className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800/50 cursor-pointer transition-all">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white">
-                            U
-                        </div>
-                        <div className="flex-1 overflow-hidden">
-                            <div className="text-sm font-medium text-gray-200 truncate">User Account</div>
-                            <div className="text-xs text-gray-500 truncate">user@example.com</div>
-                        </div>
-                    </div>
-                </div>
             </div>
 
         </div>

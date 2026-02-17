@@ -89,7 +89,7 @@ export const GlobalSettingsModal: React.FC<GlobalSettingsModalProps> = ({ onClos
     }, []);
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200" role="dialog" aria-modal="true">
             {/* Wider Container for "Landscape View" */}
             <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-5xl shadow-2xl relative flex flex-col max-h-[90vh]">
 
