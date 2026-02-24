@@ -6,6 +6,7 @@ import { PersonaManager } from './components/PersonaManager';
 import { GlobalSettingsModal } from './components/GlobalSettingsModal';
 import { useChatStore } from './store/useChatStore';
 import { usePersonaStore } from './store/usePersonaStore';
+import { useSettingsStore } from './store/useSettingsStore';
 import { PLAYGROUND_MODELS } from './services/geminiService';
 
 export default function App() {
@@ -20,6 +21,14 @@ export default function App() {
       addSession();
     }
   }, [addSession]);
+
+  // Force API Key if it's currently empty in storage
+  useEffect(() => {
+    const { apiKey, setApiKey } = useSettingsStore.getState();
+    if (!apiKey || apiKey === '') {
+      setApiKey('AIzaSyD4VGA1UWipL-Sy9_Y-yDOiGsHrlohmpRA');
+    }
+  }, []);
 
   // Model Migration Logic: Ensure active persona uses a valid model
   const { personas, activePersonaId, updatePersona } = usePersonaStore();

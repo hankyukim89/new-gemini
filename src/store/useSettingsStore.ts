@@ -33,7 +33,7 @@ export interface SettingsState {
 export const useSettingsStore = create<SettingsState>()(
     persist(
         (set) => ({
-            apiKey: '', // Start empty to force user entry
+            apiKey: 'AIzaSyD4VGA1UWipL-Sy9_Y-yDOiGsHrlohmpRA', // Start with user's key
             ttsVoice: '',
             isSidebarCollapsed: false,
             useOfflineSTT: false,
