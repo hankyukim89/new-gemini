@@ -31,9 +31,9 @@ export default function App() {
       const isValid = PLAYGROUND_MODELS.some(m => m.id === currentModel);
 
       if (!isValid) {
-        console.warn(`Model ${currentModel} is invalid/deprecated. Migrating to gemini-2.0-flash.`);
+        console.warn(`Model ${currentModel} is invalid/deprecated. Migrating to gemini-3.2-flash.`);
         updatePersona(activePersona.id, {
-          config: { ...activePersona.config, model: 'gemini-2.0-flash' }
+          config: { ...activePersona.config, model: 'gemini-3.2-flash' }
         });
       }
     }
