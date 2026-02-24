@@ -454,7 +454,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                                             <input
                                                                 type="range"
                                                                 min="100"
-                                                                max={MODEL_LIMITS[formData.config?.model || 'gemini-3.2-flash'] || 8192}
+                                                                max={MODEL_LIMITS[formData.config?.model || 'gemini-3.0-flash'] || 8192}
                                                                 step="100"
                                                                 value={formData.config?.maxOutputTokens || 8192}
                                                                 onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}
@@ -463,7 +463,7 @@ export const PersonaManager: React.FC<PersonaManagerProps> = ({ isOpen, onClose 
                                                             <input
                                                                 type="number"
                                                                 min="100"
-                                                                max={MODEL_LIMITS[formData.config?.model || 'gemini-3.2-flash'] || 81920}
+                                                                max={MODEL_LIMITS[formData.config?.model || 'gemini-3.0-flash'] || 81920}
                                                                 step="100"
                                                                 value={formData.config?.maxOutputTokens || 8192}
                                                                 onChange={(e) => updateConfig('maxOutputTokens', parseInt(e.target.value))}

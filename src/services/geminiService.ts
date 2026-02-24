@@ -4,26 +4,43 @@ import type { Attachment } from "../store/useChatStore";
 
 // --- STRICT Model List ---
 export const PLAYGROUND_MODELS = [
-    { id: 'gemini-3.2-pro', name: 'Gemini 3.2 Pro' },
-    { id: 'gemini-3.2-flash', name: 'Gemini 3.2 Flash' },
     { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
-    { id: 'gemini-3.1-flash', name: 'Gemini 3.1 Flash' },
     { id: 'gemini-3.0-pro', name: 'Gemini 3 Pro' },
     { id: 'gemini-3.0-flash', name: 'Gemini 3 Flash' },
+    { id: 'nano-banana-pro', name: 'Nano Banana Pro' },
     { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' },
+    { id: 'nano-banana', name: 'Nano Banana' },
+    { id: 'gemini-2.5-flash-live', name: 'Gemini 2.5 Flash Live' },
+    { id: 'gemini-2.5-flash-tts', name: 'Gemini 2.5 Flash TTS' },
+    { id: 'gemini-2.5-pro-tts', name: 'Gemini 2.5 Pro TTS' },
+    { id: 'lyria-experimental', name: 'Lyria Experimental' },
+    { id: 'veo-3.1', name: 'Veo 3.1' },
+    { id: 'imagen-4', name: 'Imagen 4' },
+    { id: 'computer-use', name: 'Computer Use' },
+    { id: 'gemini-deep-research', name: 'Deep Research' },
 ];
 
 export const MODEL_LIMITS: Record<string, number> = {
-    'gemini-3.2-pro': 2097152, // 2M
-    'gemini-3.2-flash': 1048576,
     'gemini-3.1-pro': 2097152,
-    'gemini-3.1-flash': 1048576,
-    'gemini-3.0-pro': 1048576,
+    'gemini-3.0-pro': 2097152,
     'gemini-3.0-flash': 1048576,
+    'nano-banana-pro': 1048576,
     'gemini-2.5-pro': 1048576,
     'gemini-2.5-flash': 1048576,
+    'gemini-2.5-flash-lite': 1048576,
+    'nano-banana': 1048576,
+    'gemini-2.5-flash-live': 1048576,
+    'gemini-2.5-flash-tts': 100000,
+    'gemini-2.5-pro-tts': 100000,
+    'lyria-experimental': 100000,
+    'veo-3.1': 100000,
+    'imagen-4': 100000,
+    'computer-use': 2097152,
+    'gemini-deep-research': 2097152,
 };
+
 
 export interface ServiceResponse {
     text: string;
