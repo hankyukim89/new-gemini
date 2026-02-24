@@ -22,14 +22,6 @@ export default function App() {
     }
   }, [addSession]);
 
-  // Force API Key if it's currently empty in storage
-  useEffect(() => {
-    const { apiKey, setApiKey } = useSettingsStore.getState();
-    if (!apiKey || apiKey === '') {
-      setApiKey('AIzaSyD4VGA1UWipL-Sy9_Y-yDOiGsHrlohmpRA');
-    }
-  }, []);
-
   // Model Migration Logic: Ensure active persona uses a valid model
   const { personas, activePersonaId, updatePersona } = usePersonaStore();
 
