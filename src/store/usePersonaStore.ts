@@ -35,7 +35,7 @@ export interface PersonaState {
 }
 
 export const DEFAULT_CONFIG: PersonaConfig = {
-    model: 'gemini-3.2-flash',
+    model: 'gemini-3.0-flash',
     temperature: 0.7,
     topK: 40,
     topP: 0.95,
@@ -62,7 +62,7 @@ export const usePersonaStore = create<PersonaState>()(
                     avatar: '💻',
                     config: {
                         ...DEFAULT_CONFIG,
-                        model: 'gemini-3.2-flash',
+                        model: 'gemini-3.0-flash',
                         temperature: 0.1
                     }
                 },
