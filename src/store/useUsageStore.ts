@@ -17,39 +17,27 @@ interface UsageState {
     addUsage: (record: Omit<UsageRecord, 'timestamp' | 'cost'>) => void;
 }
 
-// Mock pricing - could be replaced with real API pricing if known
+// PRICING (USD per token) - February 2026 Update
 export const PRICING = {
-    // 1.5 Pro (Standard) - $3.50 / $10.50 per 1M tokens (assuming <128k context for simplicity)
-    'gemini-1.5-pro': { input: 3.50 / 1_000_000, output: 10.50 / 1_000_000 },
-    'gemini-1.5-pro-latest': { input: 3.50 / 1_000_000, output: 10.50 / 1_000_000 },
-    'gemini-1.5-pro-001': { input: 3.50 / 1_000_000, output: 10.50 / 1_000_000 },
-    'gemini-1.5-pro-002': { input: 3.50 / 1_000_000, output: 10.50 / 1_000_000 },
+    // Gemini 3.2 Series
+    'gemini-3.2-pro': { input: 2.50 / 1_000_000, output: 15.00 / 1_000_000 },
+    'gemini-3.2-flash': { input: 0.15 / 1_000_000, output: 0.60 / 1_000_000 },
 
-    // 1.5 Flash (High Efficiency) - $0.075 / $0.30 per 1M tokens
+    // Gemini 3.1 Series
+    'gemini-3.1-pro': { input: 2.00 / 1_000_000, output: 12.00 / 1_000_000 },
+    'gemini-3.1-flash': { input: 0.10 / 1_000_000, output: 0.40 / 1_000_000 },
+
+    // Gemini 3.0 Series
+    'gemini-3.0-pro': { input: 1.25 / 1_000_000, output: 5.00 / 1_000_000 },
+    'gemini-3.0-flash': { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
+
+    // Gemini 2.5 Series
+    'gemini-2.5-pro': { input: 1.25 / 1_000_000, output: 5.00 / 1_000_000 },
+    'gemini-2.5-flash': { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
+
+    // Legacy / Others
+    'gemini-1.5-pro': { input: 1.25 / 1_000_000, output: 5.00 / 1_000_000 },
     'gemini-1.5-flash': { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
-    'gemini-1.5-flash-latest': { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
-    'gemini-1.5-flash-001': { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
-    'gemini-1.5-flash-002': { input: 0.075 / 1_000_000, output: 0.30 / 1_000_000 },
-    'gemini-1.5-flash-8b': { input: 0.0375 / 1_000_000, output: 0.15 / 1_000_000 },
-
-
-    // 1.0 Pro - $0.50 / $1.50 per 1M tokens
-    'gemini-1.0-pro': { input: 0.50 / 1_000_000, output: 1.50 / 1_000_000 },
-    'gemini-pro': { input: 0.50 / 1_000_000, output: 1.50 / 1_000_000 },
-
-    // 2.0 Flash (Preview) - Currently Free
-    'gemini-2.0-flash': { input: 0, output: 0 },
-    'gemini-2.0-flash-exp': { input: 0, output: 0 },
-    'gemini-2.0-flash-lite-preview-02-05': { input: 0, output: 0 },
-    'gemini-2.0-pro-exp-02-05': { input: 0, output: 0 },
-
-    // Future/Preview Models (Assume Free for now)
-    'gemini-2.0-flash-lite': { input: 0, output: 0 },
-    'gemini-2.5-pro': { input: 0, output: 0 },
-    'gemini-2.5-flash': { input: 0, output: 0 },
-    'gemini-2.5-flash-lite': { input: 0, output: 0 },
-    'gemini-3-pro-preview': { input: 0, output: 0 },
-    'gemini-3-flash-preview': { input: 0, output: 0 },
 };
 
 export const useUsageStore = create<UsageState>()(
